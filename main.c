@@ -2,8 +2,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "huffman.h"
-#include "vigenere.h"
+#include "comp_folder/huffman.h"
+#include "enc_folder/vigenere.h"
 
 int main() {
     char opcion[30];
