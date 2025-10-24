@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "vigenere.h"
+
 // Cifra usando Vigenère (para todo el ASCII)
 void vigenere_encrypt(char *text, char *key, char *result) {
     int textLen = strlen(text);

@@ -1,5 +1,5 @@
-#ifndef FUNCIONES_H
-#define FUNCIONES_H
+#ifndef HUFFMAN_H
+#define HUFFMAN_H
 
 #include <stdio.h>
 #include <stdlib.h>

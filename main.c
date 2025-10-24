@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "huffman.h"
+#include "vigenere.h"
 
 int main() {
     char opcion[30];
