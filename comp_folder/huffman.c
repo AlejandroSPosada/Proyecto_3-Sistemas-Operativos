@@ -141,18 +141,15 @@ void HuffmanCodes(char data[], int freq[], int size) {
     printCodes(root, arr, top);
 }
 
-// ---------- Your run() function ----------
 void runHuffman(char arr[]) {
     int freq[MAX_CHARS] = {0};
     int len = strlen(arr);
 
-    // Count frequencies
     for (int i = 0; i < len; i++) {
         unsigned char c = arr[i];
         freq[c]++;
     }
-
-    // Build arrays for characters that actually appear
+    
     char chars[MAX_CHARS];
     int freqs[MAX_CHARS];
     int size = 0;
