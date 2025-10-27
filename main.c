@@ -16,15 +16,26 @@ int main() {
     scanf("%s", opcion);
 
     if (strcmp(opcion, "-c") == 0){ 
-        printf("Algoritmos de compresion: \n - vigenere ");
+        printf("Algoritmos de compresion: \n - vigenere \n");
         scanf("%s", compalg);
     }
-    else if (strcmp(opcion, "-d") == 0) printf("je");
-    else if (strcmp(opcion, "-e") == 0) printf("ji");
-    else if (strcmp(opcion, "-u") == 0) printf("jo");
-    else if (strcmp(opcion, "-ce") == 0) printf("ju");
+    else if (strcmp(opcion, "-d") == 0){
+        printf("je");
+    }
+    else if (strcmp(opcion, "-e") == 0){
+        printf("ji");
+    }
+    else if (strcmp(opcion, "-u") == 0){ 
+        printf("jo");
+    }
+    else if (strcmp(opcion, "-ce") == 0){ 
+        printf("ju");
+    }
     else printf("Opcion no valida.\n");
 
-    runHuffman("ADACADABRA!");
+    FILE* input = fopen("input.txt", "wb");
+    char myString[100];
+    fread(&myString, sizeof(int), 1, input);
+    writeHuffman(myString);
     return 0;
 }
