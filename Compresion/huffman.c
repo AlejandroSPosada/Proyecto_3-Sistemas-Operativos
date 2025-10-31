@@ -1,26 +1,55 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include "huffman.h"
 
-#define MAX_TREE_HT 100
-#define MAX_CHARS 300
+#define MAX_TREE_HT 512
+#define MAX_CHARS 256
 
 // ----- Node structure -----
 struct MinHeapNode* newNode(char data, unsigned freq) {
     struct MinHeapNode* temp = (struct MinHeapNode*)malloc(sizeof(struct MinHeapNode));
+    if (!temp) {
+        perror("malloc newNode");
+        return NULL;
+    }
     temp->left = temp->right = NULL;
     temp->data = data;
     temp->freq = freq;
     return temp;
 }
 
+// Free Huffman tree recursively
+void freeHuffmanTree(struct MinHeapNode* root) {
+    if (!root) return;
+    freeHuffmanTree(root->left);
+    freeHuffmanTree(root->right);
+    free(root);
+}
+
+// Free MinHeap structure
+void freeMinHeap(struct MinHeap* minHeap) {
+    if (!minHeap) return;
+    if (minHeap->array) free(minHeap->array);
+    free(minHeap);
+}
+
 // ----- MinHeap -----
 struct MinHeap* createMinHeap(unsigned capacity) {
     struct MinHeap* minHeap = (struct MinHeap*)malloc(sizeof(struct MinHeap));
+    if (!minHeap) {
+        perror("malloc MinHeap");
+        return NULL;
+    }
     minHeap->size = 0;
     minHeap->capacity = capacity;
     minHeap->array = (struct MinHeapNode**)malloc(minHeap->capacity * sizeof(struct MinHeapNode*));
+    if (!minHeap->array) {
+        perror("malloc MinHeap array");
+        free(minHeap);
+        return NULL;
+    }
     return minHeap;
 }
 
@@ -81,8 +110,16 @@ int isLeaf(struct MinHeapNode* root) {
 
 struct MinHeap* createAndBuildMinHeap(char data[], int freq[], int size) {
     struct MinHeap* minHeap = createMinHeap(size);
-    for (int i = 0; i < size; ++i)
+    if (!minHeap) return NULL;
+    for (int i = 0; i < size; ++i) {
         minHeap->array[i] = newNode(data[i], freq[i]);
+        if (!minHeap->array[i]) {
+            // Cleanup on failure
+            for (int j = 0; j < i; j++) free(minHeap->array[j]);
+            freeMinHeap(minHeap);
+            return NULL;
+        }
+    }
     minHeap->size = size;
     buildMinHeap(minHeap);
     return minHeap;
@@ -91,20 +128,39 @@ struct MinHeap* createAndBuildMinHeap(char data[], int freq[], int size) {
 struct MinHeapNode* buildHuffmanTree(char data[], int freq[], int size) {
     struct MinHeapNode *left, *right, *top;
     struct MinHeap* minHeap = createAndBuildMinHeap(data, freq, size);
+    if (!minHeap) return NULL;
+
+    // Handle single character case
+    if (size == 1) {
+        top = newNode('$', freq[0]);
+        if (top) {
+            top->left = minHeap->array[0];
+            top->right = NULL;
+        }
+        freeMinHeap(minHeap);
+        return top;
+    }
 
     while (!isSizeOne(minHeap)) {
         left = extractMin(minHeap);
         right = extractMin(minHeap);
         top = newNode('$', left->freq + right->freq);
+        if (!top) {
+            freeMinHeap(minHeap);
+            return NULL;
+        }
         top->left = left;
         top->right = right;
         insertMinHeap(minHeap, top);
     }
-    return extractMin(minHeap);
+    
+    struct MinHeapNode* root = extractMin(minHeap);
+    freeMinHeap(minHeap);
+    return root;
 }
 
 // --- Build Huffman Codes ---
-void storeCodes(struct MinHeapNode* root, int arr[], int top, char codes[256][MAX_TREE_HT]) {
+void storeCodes(struct MinHeapNode* root, int arr[], int top, char codes[][MAX_TREE_HT]) {
     if (root->left) {
         arr[top] = 0;
         storeCodes(root->left, arr, top + 1, codes);
@@ -122,41 +178,92 @@ void storeCodes(struct MinHeapNode* root, int arr[], int top, char codes[256][MA
     }
 }
 
-void HuffmanCodes(char data[], int freq[], int size, char codes[256][MAX_TREE_HT]) {
+void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]) {
     struct MinHeapNode* root = buildHuffmanTree(data, freq, size);
+    if (!root) {
+        fprintf(stderr, "Error building Huffman tree\n");
+        return;
+    }
     int arr[MAX_TREE_HT], top = 0;
-    storeCodes(root, arr, top, codes);
+    
+    // Special case: single character
+    if (size == 1) {
+        codes[(unsigned char)data[0]][0] = '0';
+        codes[(unsigned char)data[0]][1] = '\0';
+    } else {
+        storeCodes(root, arr, top, codes);
+    }
+    
+    freeHuffmanTree(root);
 }
 
 // --- Write in .bin ---
 void writeHuffman(char inputFile[]) {
-    FILE* input = fopen(inputFile, "r");
-    if (!input) { perror("Cannot open input file"); return; }
+    FILE* input = fopen(inputFile, "rb");
+    if (!input) { 
+        fprintf(stderr, "Cannot open input file '%s': ", inputFile);
+        perror("");
+        return; 
+    }
 
-    char arr[10000]; // adjust size as needed
-    int len = fread(arr, 1, sizeof(arr) - 1, input);
-    arr[len] = '\0'; // null terminate
+    // Get file size
+    fseek(input, 0, SEEK_END);
+    long fileSize = ftell(input);
+    rewind(input);
+    
+    if (fileSize <= 0) {
+        fprintf(stderr, "File '%s' is empty or invalid\n", inputFile);
+        fclose(input);
+        return;
+    }
+
+    // Allocate buffer for entire file
+    char* arr = (char*)malloc(fileSize);
+    if (!arr) {
+        perror("malloc file buffer");
+        fclose(input);
+        return;
+    }
+    
+    size_t len = fread(arr, 1, fileSize, input);
     fclose(input);
 
-    int freq[MAX_CHARS] = {0};
+    if (len == 0) {
+        fprintf(stderr, "Failed to read from '%s'\n", inputFile);
+        free(arr);
+        return;
+    }
 
-    for (int i = 0; i < len; i++)
+    uint32_t freq[MAX_CHARS] = {0};
+
+    for (size_t i = 0; i < len; i++)
         freq[(unsigned char)arr[i]]++;
 
     char chars[MAX_CHARS];
-    int freqs[MAX_CHARS];
-    int size = 0;
+    uint32_t freqs[MAX_CHARS];
+    uint32_t size = 0;
 
     for (int i = 0; i < MAX_CHARS; i++) {
         if (freq[i] > 0) {
             chars[size] = (char)i;
-            freqs[size] = freq[i];
+            freqs[size] = (uint32_t)freq[i];
             size++;
         }
     }
 
+    if (size == 0) {
+        fprintf(stderr, "No characters to encode\n");
+        free(arr);
+        return;
+    }
+
     char codes[256][MAX_TREE_HT] = {{0}};
-    HuffmanCodes(chars, freqs, size, codes);
+    // Convert uint32_t to int for HuffmanCodes
+    int freqs_int[MAX_CHARS];
+    for (uint32_t i = 0; i < size; i++) {
+        freqs_int[i] = (int)freqs[i];
+    }
+    HuffmanCodes(chars, freqs_int, size, codes);
 
     // Encode text into bits
     unsigned char buffer = 0;
@@ -164,21 +271,25 @@ void writeHuffman(char inputFile[]) {
     int totalBits = 0;
 
     FILE* out = fopen("File_Manager/output.bin", "wb");
-    if (!out) { perror("Cannot open output.bin"); return; }
-
-    // Write header
-    fwrite(&size, sizeof(int), 1, out);
-    for (int i = 0; i < size; i++) {
-        fwrite(&chars[i], sizeof(char), 1, out);
-        fwrite(&freqs[i], sizeof(int), 1, out);
+    if (!out) { 
+        perror("Cannot open File_Manager/output.bin"); 
+        free(arr);
+        return; 
     }
 
-    // Reserve space for totalBits (we’ll overwrite later)
-    long bitCountPos = ftell(out);
-    int placeholder = 0;
-    fwrite(&placeholder, sizeof(int), 1, out);
+    // Write header with fixed-size types
+    fwrite(&size, sizeof(uint32_t), 1, out);
+    for (uint32_t i = 0; i < size; i++) {
+        fwrite(&chars[i], sizeof(char), 1, out);
+        fwrite(&freqs[i], sizeof(uint32_t), 1, out);
+    }
 
-    for (int i = 0; i < len; i++) {
+    // Reserve space for totalBits (we'll overwrite later)
+    long bitCountPos = ftell(out);
+    uint32_t placeholder = 0;
+    fwrite(&placeholder, sizeof(uint32_t), 1, out);
+
+    for (size_t i = 0; i < len; i++) {
         char* code = codes[(unsigned char)arr[i]];
         for (int j = 0; code[j] != '\0'; j++) {
             buffer <<= 1;
@@ -200,14 +311,24 @@ void writeHuffman(char inputFile[]) {
 
     // Write totalBits value
     fseek(out, bitCountPos, SEEK_SET);
-    fwrite(&totalBits, sizeof(int), 1, out);
+    fwrite(&totalBits, sizeof(uint32_t), 1, out);
 
     fclose(out);
-    printf("Compressed data saved to output.bin\n");
+    free(arr);
 }
 
 // ---- Decompress function ----
 void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBits, FILE* outTxt) {
+    if (!root) return;
+    
+    // Handle single character case
+    if (!root->left && !root->right) {
+        for (int i = 0; i < dataSizeBits; i++) {
+            fputc(root->data, outTxt);
+        }
+        return;
+    }
+    
     struct MinHeapNode* current = root;
 
     for (int i = 0; i < dataSizeBits; i++) {
@@ -220,6 +341,11 @@ void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBi
         else
             current = current->right;
 
+        if (!current) {
+            fprintf(stderr, "Decode error: invalid tree traversal\n");
+            return;
+        }
+
         if (isLeaf(current)) {
             fputc(current->data, outTxt);
             current = root;
@@ -230,46 +356,117 @@ void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBi
 int readHuffman(char arr[] ) {
     FILE* in = fopen(arr, "rb");
     if (!in) {
-        perror("Cannot open output.bin");
+        fprintf(stderr, "Cannot open file '%s': ", arr);
+        perror("");
         return 1;
     }
 
-    int size;
-    fread(&size, sizeof(int), 1, in);
+    uint32_t size;
+    if (fread(&size, sizeof(uint32_t), 1, in) != 1) {
+        perror("fread size");
+        fclose(in);
+        return 1;
+    }
+
+    if (size == 0 || size > MAX_CHARS) {
+        fprintf(stderr, "Invalid size in compressed file: %u\n", size);
+        fclose(in);
+        return 1;
+    }
 
     char* chars = (char*)malloc(size);
-    int* freqs = (int*)malloc(size * sizeof(int));
+    uint32_t* freqs = (uint32_t*)malloc(size * sizeof(uint32_t));
+    
+    if (!chars || !freqs) {
+        perror("malloc for chars/freqs");
+        free(chars);
+        free(freqs);
+        fclose(in);
+        return 1;
+    }
 
-    for (int i = 0; i < size; i++) {
-        fread(&chars[i], sizeof(char), 1, in);
-        fread(&freqs[i], sizeof(int), 1, in);
+    for (uint32_t i = 0; i < size; i++) {
+        if (fread(&chars[i], sizeof(char), 1, in) != 1) {
+            perror("fread char");
+            fclose(in);
+            free(chars); free(freqs);
+            return 1;
+        }
+        if (fread(&freqs[i], sizeof(uint32_t), 1, in) != 1) {
+            perror("fread freq");
+            fclose(in);
+            free(chars); free(freqs);
+            return 1;
+        }
     }
 
     // Read totalBits
-    int totalBits;
-    fread(&totalBits, sizeof(int), 1, in);
+    uint32_t totalBits;
+    if (fread(&totalBits, sizeof(uint32_t), 1, in) != 1) {
+        perror("fread totalBits");
+        fclose(in);
+        free(chars); free(freqs);
+        return 1;
+    }
 
     // Read encoded data
     fseek(in, 0, SEEK_END);
     long endPos = ftell(in);
-    long dataStart = sizeof(int) + size * (sizeof(char) + sizeof(int)) + sizeof(int);
+    long dataStart = sizeof(uint32_t) + size * (sizeof(char) + sizeof(uint32_t)) + sizeof(uint32_t);
     long bytesToRead = endPos - dataStart;
+    
+    if (bytesToRead <= 0) {
+        fprintf(stderr, "Invalid compressed file format\n");
+        fclose(in);
+        free(chars); free(freqs);
+        return 1;
+    }
+    
     fseek(in, dataStart, SEEK_SET);
 
     unsigned char* encodedData = (unsigned char*)malloc(bytesToRead);
-    fread(encodedData, 1, bytesToRead, in);
+    if (!encodedData) {
+        perror("malloc encodedData");
+        fclose(in);
+        free(chars); free(freqs);
+        return 1;
+    }
+    
+    size_t rd = fread(encodedData, 1, bytesToRead, in);
+    if (rd != (size_t)bytesToRead) {
+        perror("fread encodedData");
+        fclose(in);
+        free(chars); free(freqs); free(encodedData);
+        return 1;
+    }
     fclose(in);
 
-    // Rebuild tree
-    struct MinHeapNode* root = buildHuffmanTree(chars, freqs, size);
+    // Rebuild tree - convert uint32_t to int
+    int freqs_int[MAX_CHARS];
+    for (uint32_t i = 0; i < size; i++) {
+        freqs_int[i] = (int)freqs[i];
+    }
+    struct MinHeapNode* root = buildHuffmanTree(chars, freqs_int, size);
+    
+    if (!root) {
+        fprintf(stderr, "Failed to rebuild Huffman tree\n");
+        free(chars); free(freqs); free(encodedData);
+        return 1;
+    }
 
     // Decode using totalBits
     FILE* outTxt = fopen("File_Manager/output.txt", "w");
+    if (!outTxt) {
+        perror("Cannot open File_Manager/output.txt");
+        freeHuffmanTree(root);
+        free(chars); free(freqs); free(encodedData);
+        return 1;
+    }
+    
     decodeHuffman(root, encodedData, totalBits, outTxt);
     fclose(outTxt);
 
-    printf("Decompressed data saved to output.txt\n");
-
+    freeHuffmanTree(root);
     free(chars);
     free(freqs);
     free(encodedData);

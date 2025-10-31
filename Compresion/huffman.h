@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef MAX_TREE_HT
+#define MAX_TREE_HT 512
+#endif
+
 // Nodo del árbol de Huffman
 struct MinHeapNode {
     char data;               // carácter
@@ -31,7 +35,7 @@ int isLeaf(struct MinHeapNode* root);
 struct MinHeap* createAndBuildMinHeap(char data[], int freq[], int size);
 struct MinHeapNode* buildHuffmanTree(char data[], int freq[], int size);
 void printCodes(struct MinHeapNode* root, int arr[], int top);
-void HuffmanCodes(char *, int *, int,  char (*)[100]);
+void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]);
 void writeHuffman(char arr[]);
 void decodeHuffman(struct MinHeapNode*, unsigned char*, int, FILE*);
 int readHuffman(char arr[]);
