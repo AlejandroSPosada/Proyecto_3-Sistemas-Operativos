@@ -6,6 +6,7 @@
 #include <errno.h>
 
 #include "huffman.h"
+#include "rle.h"
 #include "vigenere.h"
 
 static void usage(const char* prog) {
@@ -18,7 +19,7 @@ static void usage(const char* prog) {
         "  -u    Desencriptar (Vigenère)\n"
         "  -ce   Comprimir y luego encriptar (limitado, ver nota)\n\n"
         "Opciones:\n"
-        "  --comp-alg [nombre]   Algoritmo de compresión (huffman)\n"
+        "  --comp-alg [nombre]   Algoritmo de compresión (huffman, rle)\n"
         "  --enc-alg  [nombre]   Algoritmo de encriptación (vigenere)\n"
         "  -i [ruta]             Archivo de entrada\n"
         "  -o [ruta]             Archivo de salida\n"
@@ -146,8 +147,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (op_c || op_d) {
-        if (strcmp(compAlg, "huffman") != 0) {
-            fprintf(stderr, "Algoritmo de compresión no soportado: %s\n", compAlg);
+        if (strcmp(compAlg, "huffman") != 0 && strcmp(compAlg, "rle") != 0) {
+            fprintf(stderr, "Algoritmo de compresión no soportado: %s (use: huffman o rle)\n", compAlg);
             return 1;
         }
     }
@@ -180,9 +181,20 @@ int main(int argc, char** argv) {
 
     // Ejecutar operación individual
     if (op_c) {
-        // Huffman: entrada -> File_Manager/output.bin
-        writeHuffman((char*)inPath);
-        const char* produced = "File_Manager/output.bin";
+        // Compression: entrada -> File_Manager/output.[ext]
+        const char* produced;
+        
+        if (strcmp(compAlg, "huffman") == 0) {
+            writeHuffman((char*)inPath);
+            produced = "File_Manager/output.bin";
+        } else if (strcmp(compAlg, "rle") == 0) {
+            writeRLE((char*)inPath);
+            produced = "File_Manager/output.rle";
+        } else {
+            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
+            return 1;
+        }
+        
         // Siempre dejar en File_Manager: usar nombre dado por -o (si existe) pero dentro de File_Manager
         if (!file_exists(produced)) {
             fprintf(stderr, "No se encontró salida de compresión: %s\n", produced);
@@ -205,12 +217,23 @@ int main(int argc, char** argv) {
     }
 
     if (op_d) {
-        // Huffman: .bin (inPath) -> File_Manager/output.txt
+        // Decompression: entrada -> File_Manager/output.txt
         if (!file_exists(inPath)) {
             fprintf(stderr, "Entrada no encontrada: %s\n", inPath);
             return 1;
         }
-        if (readHuffman((char*)inPath) != 0) {
+        
+        int result;
+        if (strcmp(compAlg, "huffman") == 0) {
+            result = readHuffman((char*)inPath);
+        } else if (strcmp(compAlg, "rle") == 0) {
+            result = readRLE((char*)inPath);
+        } else {
+            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
+            return 1;
+        }
+        
+        if (result != 0) {
             fprintf(stderr, "Fallo al descomprimir %s\n", inPath);
             return 1;
         }
