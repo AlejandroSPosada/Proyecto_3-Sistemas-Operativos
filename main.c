@@ -8,6 +8,7 @@
 #include "huffman.h"
 #include "rle.h"
 #include "vigenere.h"
+#include "lzw.h"
 
 static void usage(const char* prog) {
     fprintf(stderr,
@@ -19,7 +20,7 @@ static void usage(const char* prog) {
         "  -u    Desencriptar (Vigenère)\n"
         "  -ce   Comprimir y luego encriptar (limitado, ver nota)\n\n"
         "Opciones:\n"
-        "  --comp-alg [nombre]   Algoritmo de compresión (huffman, rle)\n"
+    "  --comp-alg [nombre]   Algoritmo de compresión (huffman, rle, lzw)\n"
         "  --enc-alg  [nombre]   Algoritmo de encriptación (vigenere)\n"
         "  -i [ruta]             Archivo de entrada\n"
         "  -o [ruta]             Archivo de salida\n"
@@ -147,8 +148,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (op_c || op_d) {
-        if (strcmp(compAlg, "huffman") != 0 && strcmp(compAlg, "rle") != 0) {
-            fprintf(stderr, "Algoritmo de compresión no soportado: %s (use: huffman o rle)\n", compAlg);
+        if (strcmp(compAlg, "huffman") != 0 && strcmp(compAlg, "rle") != 0 && strcmp(compAlg, "lzw") != 0) {
+            fprintf(stderr, "Algoritmo de compresión no soportado: %s (use: huffman, rle o lzw)\n", compAlg);
             return 1;
         }
     }
@@ -190,6 +191,9 @@ int main(int argc, char** argv) {
         } else if (strcmp(compAlg, "rle") == 0) {
             writeRLE((char*)inPath);
             produced = "File_Manager/output.rle";
+        } else if (strcmp(compAlg, "lzw") == 0) {
+            writeLZW((char*)inPath);
+            produced = "File_Manager/output.lzw";
         } else {
             fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
             return 1;
@@ -228,6 +232,8 @@ int main(int argc, char** argv) {
             result = readHuffman((char*)inPath);
         } else if (strcmp(compAlg, "rle") == 0) {
             result = readRLE((char*)inPath);
+        } else if (strcmp(compAlg, "lzw") == 0) {
+            result = readLZW((char*)inPath);
         } else {
             fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
             return 1;

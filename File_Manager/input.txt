@@ -1,11 +1,1 @@
-La aplicación deberá ser invocada desde la terminal y aceptar los
-siguientes parámetros:
-• Operación: -c (comprimir), -d (descomprimir), -e (encriptar), -u
-(desencriptar). Se pueden combinar operaciones (ej. -ce para
-comprimir y luego encriptar).
-• Algoritmo de Compresión: --comp-alg [nombre_algoritmo]
-• Algoritmo de Encriptación: --enc-alg [nombre_algoritmo]
-• Entrada: -i [ruta_archivo_o_directorio]
-• Salida: -o [ruta_archivo_o_directorio_salida]
-• Clave (opcional): -k [clave_secreta] para las operaciones de
-encriptación/desencriptación
+En una aldea escondida entre montañas vivía un joven llamado Tarek. Cada amanecer subía al río para pescar, soñando con aventuras más allá del valle. Un día encontró una piedra brillante que parecía respirar. Al tocarla, el cielo cambió de color y un viento desconocido susurró su nombre. Desde entonces, Tarek escuchó voces que lo guiaban hacia un destino misterioso. Abandonó su aldea con una promesa: descubrir el origen de la piedra y devolver la calma al mundo. Aunque el camino sería largo, sabía que cada paso lo acercaba a su propósito y a la verdad oculta en su interior.
