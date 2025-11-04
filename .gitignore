@@ -41,12 +41,7 @@ core
 core.*
 
 # VS Code
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-!.vscode/c_cpp_properties.json
+.vscode/
 *.code-workspace
 
 # Temporary files
@@ -70,3 +65,5 @@ Makefile
 *~
 \#*\#
 .\#*
+
+programa

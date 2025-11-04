@@ -9,6 +9,7 @@
 #include "rle.h"
 #include "vigenere.h"
 #include "lzw.h"
+#include "common.h"
 
 static void usage(const char* prog) {
     fprintf(stderr,
@@ -46,36 +47,6 @@ static int move_file(const char* src, const char* dst) {
     if (rename(src, dst) == 0) return 0;
     perror("rename");
     return -1;
-}
-
-static char* read_text_file(const char* path, size_t* outLen) {
-    FILE* f = fopen(path, "r");
-    if (!f) { perror("fopen"); return NULL; }
-    if (fseek(f, 0, SEEK_END) != 0) { perror("fseek"); fclose(f); return NULL; }
-    long sz = ftell(f);
-    if (sz < 0) { perror("ftell"); fclose(f); return NULL; }
-    rewind(f);
-    char* buf = (char*)malloc((size_t)sz + 1);
-    if (!buf) { perror("malloc"); fclose(f); return NULL; }
-    size_t rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[rd] = '\0';
-    if (outLen) *outLen = rd;
-    return buf;
-}
-
-static int write_bytes_file(const char* path, const char* data, size_t len) {
-    FILE* f = fopen(path, "wb");
-    if (!f) { perror("fopen"); return -1; }
-    size_t wr = fwrite(data, 1, len, f);
-    fclose(f);
-    return (wr == len) ? 0 : -1;
-}
-
-// Extrae el nombre base de una ruta (sin directorios)
-static const char* get_basename(const char* path) {
-    const char* lastSlash = strrchr(path, '/');
-    return lastSlash ? lastSlash + 1 : path;
 }
 
 int main(int argc, char** argv) {
@@ -227,6 +198,20 @@ int main(int argc, char** argv) {
             return 1;
         }
         
+        // If no -o provided, try to read original name from metadata inside the compressed file
+        char originalName[MAX_FILENAME_LEN] = "";
+        if (!outPath) {
+            FILE* metaF = fopen(inPath, "rb");
+            if (metaF) {
+                FileMetadata meta;
+                if (fread(&meta, sizeof(meta), 1, metaF) == 1 && meta.magic == METADATA_MAGIC) {
+                    strncpy(originalName, meta.originalName, MAX_FILENAME_LEN-1);
+                    originalName[MAX_FILENAME_LEN-1] = '\0';
+                }
+                fclose(metaF);
+            }
+        }
+
         int result;
         if (strcmp(compAlg, "huffman") == 0) {
             result = readHuffman((char*)inPath);
@@ -259,57 +244,75 @@ int main(int argc, char** argv) {
                 printf("Archivo descomprimido guardado en: %s\n", produced);
             }
         } else {
-            printf("Archivo descomprimido guardado en: %s\n", produced);
+            if (originalName[0] != '\0') {
+                char dest[512];
+                snprintf(dest, sizeof(dest), "File_Manager/%s", originalName);
+                if (strcmp(dest, produced) != 0) {
+                    if (move_file(produced, dest) != 0) return 1;
+                    printf("Archivo descomprimido guardado en: %s\n", dest);
+                } else {
+                    printf("Archivo descomprimido guardado en: %s\n", produced);
+                }
+            } else {
+                printf("Archivo descomprimido guardado en: %s\n", produced);
+            }
         }
         return 0;
     }
 
     if (op_e) {
-        // Vigenère: solo texto (usa strlen internamente)
-        size_t len = 0;
-        char* text = read_text_file(inPath, &len);
-        if (!text) return 1;
-        char* outBuf = (char*)malloc(len + 1);
-        if (!outBuf) { perror("malloc"); free(text); return 1; }
-        vigenere_encrypt(text, (char*)key, outBuf);
         char dest[512];
         if (outPath) {
             const char* base = get_basename(outPath);
             snprintf(dest, sizeof(dest), "File_Manager/%s", base);
         } else {
-            snprintf(dest, sizeof(dest), "File_Manager/output.txt");
+            // Usar nombre original con .enc
+            const char* origName = get_basename(inPath);
+            snprintf(dest, sizeof(dest), "File_Manager/%s.enc", origName);
         }
-        if (write_bytes_file(dest, outBuf, strlen(outBuf)) != 0) {
-            fprintf(stderr, "Error escribiendo salida: %s\n", dest);
-            free(text); free(outBuf); return 1;
+        
+        int result = vigenere_encrypt_file(inPath, dest, key);
+        if (result != 0) {
+            fprintf(stderr, "Error al encriptar el archivo\n");
+            return 1;
         }
+        
         printf("Archivo encriptado guardado en: %s\n", dest);
-        free(text);
-        free(outBuf);
         return 0;
     }
 
     if (op_u) {
-        size_t len = 0;
-        char* cipher = read_text_file(inPath, &len);
-        if (!cipher) return 1;
-        char* outBuf = (char*)malloc(len + 1);
-        if (!outBuf) { perror("malloc"); free(cipher); return 1; }
-        vigenere_decrypt(cipher, (char*)key, outBuf);
+        // Read metadata to get original filename
+        FILE* meta = fopen(inPath, "rb");
+        if (!meta) {
+            fprintf(stderr, "No se puede abrir el archivo encriptado: %s\n", inPath);
+            return 1;
+        }
+        
+        FileMetadata header;
+        if (fread(&header, sizeof(header), 1, meta) != 1 || header.magic != METADATA_MAGIC) {
+            fprintf(stderr, "Archivo encriptado inválido o corrupto\n");
+            fclose(meta);
+            return 1;
+        }
+        fclose(meta);
+        
         char dest[512];
         if (outPath) {
             const char* base = get_basename(outPath);
             snprintf(dest, sizeof(dest), "File_Manager/%s", base);
         } else {
-            snprintf(dest, sizeof(dest), "File_Manager/output.txt");
+            // Usar nombre original del archivo
+            snprintf(dest, sizeof(dest), "File_Manager/%s", header.originalName);
         }
-        if (write_bytes_file(dest, outBuf, strlen(outBuf)) != 0) {
-            fprintf(stderr, "Error escribiendo salida: %s\n", dest);
-            free(cipher); free(outBuf); return 1;
+        
+        int result = vigenere_decrypt_file(inPath, dest, key);
+        if (result != 0) {
+            fprintf(stderr, "Error al desencriptar el archivo\n");
+            return 1;
         }
+        
         printf("Archivo desencriptado guardado en: %s\n", dest);
-        free(cipher);
-        free(outBuf);
         return 0;
     }
 

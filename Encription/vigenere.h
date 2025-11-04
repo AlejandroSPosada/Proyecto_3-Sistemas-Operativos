@@ -1,8 +1,11 @@
 #ifndef VIGENERE_H
 #define VIGENERE_H
 
-void vigenere_encrypt(char *text, char *key, char *result);
-void vigenere_decrypt(char *cipher, char *key, char *result);
+#include <stddef.h>
+#include "../common.h"
 
+// Nuevas funciones que trabajan con bytes en lugar de texto
+int vigenere_encrypt_file(const char* inputPath, const char* outputPath, const char* key);
+int vigenere_decrypt_file(const char* inputPath, const char* outputPath, const char* key);
 
 #endif

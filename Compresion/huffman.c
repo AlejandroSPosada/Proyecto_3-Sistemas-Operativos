@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "huffman.h"
+#include "../common.h"
 
 #define MAX_TREE_HT 512
 #define MAX_CHARS 256
@@ -277,6 +278,15 @@ void writeHuffman(char inputFile[]) {
         return; 
     }
 
+    // Write metadata header
+    FileMetadata meta = {0};
+    meta.magic = METADATA_MAGIC;
+    meta.originalSize = (uint64_t)len;
+    meta.flags = 0;
+    strncpy(meta.originalName, get_basename(inputFile), MAX_FILENAME_LEN-1);
+    meta.originalName[MAX_FILENAME_LEN-1] = '\0';
+    fwrite(&meta, sizeof(meta), 1, out);
+
     // Write header with fixed-size types
     fwrite(&size, sizeof(uint32_t), 1, out);
     for (uint32_t i = 0; i < size; i++) {
@@ -361,6 +371,14 @@ int readHuffman(char arr[] ) {
         return 1;
     }
 
+    // Read metadata header
+    FileMetadata meta;
+    if (fread(&meta, sizeof(meta), 1, in) != 1 || meta.magic != METADATA_MAGIC) {
+        fprintf(stderr, "Invalid or missing metadata in compressed file\n");
+        fclose(in);
+        return 1;
+    }
+
     uint32_t size;
     if (fread(&size, sizeof(uint32_t), 1, in) != 1) {
         perror("fread size");
@@ -412,7 +430,7 @@ int readHuffman(char arr[] ) {
     // Read encoded data
     fseek(in, 0, SEEK_END);
     long endPos = ftell(in);
-    long dataStart = sizeof(uint32_t) + size * (sizeof(char) + sizeof(uint32_t)) + sizeof(uint32_t);
+    long dataStart = sizeof(meta) + sizeof(uint32_t) + size * (sizeof(char) + sizeof(uint32_t)) + sizeof(uint32_t);
     long bytesToRead = endPos - dataStart;
     
     if (bytesToRead <= 0) {

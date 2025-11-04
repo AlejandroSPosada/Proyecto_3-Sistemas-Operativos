@@ -4,7 +4,6 @@
 
 #include "huffman.h"
 
-int main(){
-    writeHuffman("File_Manager/input.txt");
-    return 0;
-}
+// int main(){
+//     writeHuffman("File_Manager/input.txt");
+//     return 0;

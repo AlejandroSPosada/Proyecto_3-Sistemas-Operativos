@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "rle.h"
+#include "../common.h"
 
 #define MAX_RUN_LENGTH 0xFFFFFFFF  // Maximum run length for uint32_t
 
@@ -55,9 +56,14 @@ void writeRLE(char inputFile[]) {
         return;
     }
 
-    // Write original file size as header (for validation)
-    uint64_t originalSize = (uint64_t)len;
-    fwrite(&originalSize, sizeof(uint64_t), 1, out);
+    // Write metadata header
+    FileMetadata meta = {0};
+    meta.magic = METADATA_MAGIC;
+    meta.originalSize = (uint64_t)len;
+    meta.flags = 0;
+    strncpy(meta.originalName, get_basename(inputFile), MAX_FILENAME_LEN-1);
+    meta.originalName[MAX_FILENAME_LEN-1] = '\0';
+    fwrite(&meta, sizeof(meta), 1, out);
 
     // RLE encoding
     size_t i = 0;
@@ -93,14 +99,15 @@ int readRLE(char inputFile[]) {
         return 1;
     }
 
-    // Read original file size from header
-    uint64_t originalSize;
-    if (fread(&originalSize, sizeof(uint64_t), 1, in) != 1) {
-        perror("fread originalSize");
+    // Read metadata header
+    FileMetadata meta;
+    if (fread(&meta, sizeof(meta), 1, in) != 1 || meta.magic != METADATA_MAGIC) {
+        fprintf(stderr, "Invalid or missing metadata in compressed file\n");
         fclose(in);
         return 1;
     }
 
+    uint64_t originalSize = meta.originalSize;
     if (originalSize == 0 || originalSize > 1024ULL * 1024 * 1024 * 10) { // Max 10GB sanity check
         fprintf(stderr, "Invalid or too large original size: %llu\n", 
                 (unsigned long long)originalSize);

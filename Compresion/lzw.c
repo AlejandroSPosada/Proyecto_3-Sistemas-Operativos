@@ -3,28 +3,39 @@
 #include <string.h>
 #include <stdint.h>
 #include "lzw.h"
+#include "../common.h"
 
 #define LZW_MAX_DICT 4096
-#define LZW_MAX_STR 1024
 
-// Diccionario: código -> cadena (valor)
 typedef struct {
-    int codigo;
-    char valor[LZW_MAX_STR];
-} EntradaDiccionario;
+    int code;
+    unsigned char* data;
+    size_t len;
+} LZWEntry;
 
-static int crearDiccionario(EntradaDiccionario *dic) {
+static int crearDiccionario(LZWEntry *dic) {
     for (int i = 0; i < 256; i++) {
-        dic[i].codigo = i;
-        dic[i].valor[0] = (char)i;
-        dic[i].valor[1] = '\0';
+        dic[i].code = i;
+        dic[i].data = (unsigned char*)malloc(1);
+        if (!dic[i].data) {
+                        for (int j = 0; j < i; j++) free(dic[j].data);
+            return -1;
+        }
+        dic[i].data[0] = (unsigned char)i;
+        dic[i].len = 1;
     }
     return 256;
 }
 
-static int HallarEnD(EntradaDiccionario *dic, int tam, const char *str) {
-    for (int i = 0; i < tam; i++) {
-        if (strcmp(dic[i].valor, str) == 0) return dic[i].codigo;
+static void freeDictionary(LZWEntry *dic, int size) {
+    for (int i = 0; i < size; i++) {
+        if (dic[i].data) free(dic[i].data);
+    }
+}
+
+static int findInDict(LZWEntry *dic, int dictSize, const unsigned char* data, size_t len) {
+    for (int i = 0; i < dictSize; i++) {
+        if (dic[i].len == len && memcmp(dic[i].data, data, len) == 0) return dic[i].code;
     }
     return -1;
 }
@@ -33,7 +44,7 @@ void writeLZW(char inputFile[]) {
     FILE* in = fopen(inputFile, "rb");
     if (!in) { fprintf(stderr, "Cannot open input file '%s': ", inputFile); perror(""); return; }
 
-    fseek(in, 0, SEEK_END);
+    if (fseek(in, 0, SEEK_END) != 0) { perror("fseek"); fclose(in); return; }
     long fileSize = ftell(in);
     rewind(in);
 
@@ -44,76 +55,96 @@ void writeLZW(char inputFile[]) {
     size_t read = fread(buf, 1, fileSize, in);
     fclose(in);
 
-    // Prepare dictionary
-    EntradaDiccionario dic[LZW_MAX_DICT];
-    int tamDict = crearDiccionario(dic);
+    LZWEntry dict[LZW_MAX_DICT];
+    int dictSize = crearDiccionario(dict);
+    if (dictSize < 0) { free(buf); fprintf(stderr, "Failed to init dictionary\n"); return; }
 
-    // Output codes (use 16-bit for storage)
     uint16_t *codes = (uint16_t*)malloc(sizeof(uint16_t) * (read + 16));
-    if (!codes) { perror("malloc codes"); free(buf); return; }
+    if (!codes) { perror("malloc codes"); free(buf); freeDictionary(dict, dictSize); return; }
     size_t outCount = 0;
 
-    char actual[LZW_MAX_STR] = "";
-    char temporal[LZW_MAX_STR];
+    unsigned char *w = NULL;
+    size_t wlen = 0;
 
     for (size_t i = 0; i < read; i++) {
-        size_t la = strlen(actual);
-        // append byte
-        actual[la] = (char)buf[i];
-        actual[la+1] = '\0';
+        unsigned char k = buf[i];
 
-        if (HallarEnD(dic, tamDict, actual) == -1) {
-            // remove last char
-            actual[la] = '\0';
-            int code = HallarEnD(dic, tamDict, actual);
-            if (code == -1) {
-                // should not happen
-                code = (unsigned char)actual[0];
-            }
-            codes[outCount++] = (uint16_t)code;
+        unsigned char *wk = (unsigned char*)malloc(wlen + 1);
+        if (!wk) { perror("malloc wk"); free(buf); free(codes); freeDictionary(dict, dictSize); return; }
+        if (wlen > 0) memcpy(wk, w, wlen);
+        wk[wlen] = k;
 
-            if (tamDict < LZW_MAX_DICT) {
-                strcpy(temporal, actual);
-                size_t lt = strlen(temporal);
-                temporal[lt] = (char)buf[i];
-                temporal[lt+1] = '\0';
-                dic[tamDict].codigo = tamDict;
-                strncpy(dic[tamDict].valor, temporal, LZW_MAX_STR-1);
-                dic[tamDict].valor[LZW_MAX_STR-1] = '\0';
-                tamDict++;
+        int idx = findInDict(dict, dictSize, wk, wlen + 1);
+        if (idx != -1) {
+            if (w) free(w);
+            w = wk;
+            wlen = wlen + 1;
+        } else {
+            if (wlen == 0) {
+                codes[outCount++] = (uint16_t)k;
+            } else {
+                int codeW = findInDict(dict, dictSize, w, wlen);
+                if (codeW == -1) {
+                    codeW = (unsigned char)w[0];
+                }
+                codes[outCount++] = (uint16_t)codeW;
             }
 
-            // new actual = last char
-            actual[0] = (char)buf[i]; actual[1] = '\0';
+            if (dictSize < LZW_MAX_DICT) {
+                dict[dictSize].data = wk;
+                dict[dictSize].len = wlen + 1;
+                dict[dictSize].code = dictSize;
+                dictSize++;
+            } else {
+                free(wk);
+            }
+            if (w) free(w);
+            w = (unsigned char*)malloc(1);
+            if (!w) { perror("malloc w"); free(buf); free(codes); freeDictionary(dict, dictSize); return; }
+            w[0] = k; wlen = 1;
         }
     }
 
-    if (strlen(actual) > 0) {
-        int code = HallarEnD(dic, tamDict, actual);
-        if (code != -1) codes[outCount++] = (uint16_t)code;
+    if (wlen > 0) {
+        int codeW = findInDict(dict, dictSize, w, wlen);
+        if (codeW != -1) codes[outCount++] = (uint16_t)codeW;
     }
 
-    // Write compressed file: [uint64 originalSize][uint32 count][uint16 codes...]
     FILE* out = fopen("File_Manager/output.lzw", "wb");
-    if (!out) { perror("Cannot open File_Manager/output.lzw"); free(buf); free(codes); return; }
+    if (!out) { perror("Cannot open File_Manager/output.lzw"); free(buf); free(codes); freeDictionary(dict, dictSize); if (w) free(w); return; }
 
-    uint64_t orig = (uint64_t)read;
+    FileMetadata meta = {0};
+    meta.magic = METADATA_MAGIC;
+    meta.originalSize = (uint64_t)read;
+    meta.flags = 0;
+    strncpy(meta.originalName, get_basename(inputFile), MAX_FILENAME_LEN-1);
+    meta.originalName[MAX_FILENAME_LEN-1] = '\0';
+    fwrite(&meta, sizeof(meta), 1, out);
+
     uint32_t count = (uint32_t)outCount;
-    fwrite(&orig, sizeof(uint64_t), 1, out);
     fwrite(&count, sizeof(uint32_t), 1, out);
     fwrite(codes, sizeof(uint16_t), outCount, out);
 
     fclose(out);
+
     free(buf);
     free(codes);
+    if (w) free(w);
+    freeDictionary(dict, dictSize);
 }
 
 int readLZW(char inputFile[]) {
     FILE* in = fopen(inputFile, "rb");
     if (!in) { fprintf(stderr, "Cannot open file '%s': ", inputFile); perror(""); return 1; }
 
-    uint64_t origSize;
-    if (fread(&origSize, sizeof(uint64_t), 1, in) != 1) { perror("fread origSize"); fclose(in); return 1; }
+    // Read metadata header
+    FileMetadata meta;
+    if (fread(&meta, sizeof(meta), 1, in) != 1 || meta.magic != METADATA_MAGIC) {
+        fprintf(stderr, "Invalid or missing metadata in compressed file\n");
+        fclose(in); return 1;
+    }
+    uint64_t origSize = meta.originalSize;
+
     uint32_t count;
     if (fread(&count, sizeof(uint32_t), 1, in) != 1) { perror("fread count"); fclose(in); return 1; }
 
@@ -124,88 +155,83 @@ int readLZW(char inputFile[]) {
     if (fread(codes, sizeof(uint16_t), count, in) != count) { perror("fread codes"); free(codes); fclose(in); return 1; }
     fclose(in);
 
-    EntradaDiccionario dic[LZW_MAX_DICT];
-    int tamDict = crearDiccionario(dic);
+    LZWEntry dict[LZW_MAX_DICT];
+    int dictSize = crearDiccionario(dict);
+    if (dictSize < 0) { free(codes); fprintf(stderr, "Failed to init dictionary\n"); return 1; }
 
-    // Reconstruct
-    // Use dynamic buffer for output
     unsigned char *outBuf = (unsigned char*)malloc(origSize > 0 ? origSize : 1);
-    if (!outBuf) { perror("malloc outBuf"); free(codes); return 1; }
+    if (!outBuf) { perror("malloc outBuf"); free(codes); freeDictionary(dict, dictSize); return 1; }
     uint64_t outPos = 0;
 
-    char previo[LZW_MAX_STR] = "";
-    char nueva[LZW_MAX_STR];
+    // Process first code
+    if (codes[0] >= (uint16_t)dictSize) { fprintf(stderr, "Invalid first code\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+    unsigned char *entry = dict[codes[0]].data;
+    size_t entryLen = dict[codes[0]].len;
+    if (outPos + entryLen > origSize) { fprintf(stderr, "Output overflow\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+    memcpy(outBuf + outPos, entry, entryLen);
+    outPos += entryLen;
 
-    // first code
-    if (codes[0] < (uint16_t)tamDict) {
-        strncpy(previo, dic[codes[0]].valor, LZW_MAX_STR-1);
-        previo[LZW_MAX_STR-1] = '\0';
-    } else {
-        fprintf(stderr, "Invalid first code\n"); free(codes); free(outBuf); return 1;
-    }
-
-    // write previo
-    size_t lp = strlen(previo);
-    if (outPos + lp > origSize) { fprintf(stderr, "Output overflow\n"); free(codes); free(outBuf); return 1; }
-    memcpy(outBuf + outPos, previo, lp);
-    outPos += lp;
+    // previous entry copy
+    unsigned char *prev = (unsigned char*)malloc(entryLen);
+    if (!prev) { perror("malloc prev"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+    memcpy(prev, entry, entryLen);
+    size_t prevLen = entryLen;
 
     for (uint32_t i = 1; i < count; i++) {
         uint16_t code = codes[i];
-        if (code < (uint16_t)tamDict) {
-            strncpy(nueva, dic[code].valor, LZW_MAX_STR-1);
-            nueva[LZW_MAX_STR-1] = '\0';
+        unsigned char *current = NULL;
+        size_t curLen = 0;
+
+        if (code < (uint16_t)dictSize) {
+            current = (unsigned char*)malloc(dict[code].len);
+            if (!current) { perror("malloc current"); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+            memcpy(current, dict[code].data, dict[code].len);
+            curLen = dict[code].len;
         } else {
-            // special case: W+C
-            strncpy(nueva, previo, LZW_MAX_STR-1);
-            nueva[LZW_MAX_STR-1] = '\0';
-            size_t ln = strlen(nueva);
-            if (ln + 1 < LZW_MAX_STR) {
-                nueva[ln] = previo[0];
-                nueva[ln+1] = '\0';
-            } else {
-                fprintf(stderr, "String too long in special case\n"); free(codes); free(outBuf); return 1;
-            }
+            // special case: code equals dictSize -> prev + first byte of prev
+            curLen = prevLen + 1;
+            current = (unsigned char*)malloc(curLen);
+            if (!current) { perror("malloc special"); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+            memcpy(current, prev, prevLen);
+            current[curLen-1] = prev[0];
         }
 
-        size_t ln = strlen(nueva);
-        if (outPos + ln > origSize) { fprintf(stderr, "Output overflow while writing\n"); free(codes); free(outBuf); return 1; }
-        memcpy(outBuf + outPos, nueva, ln);
-        outPos += ln;
+        if (outPos + curLen > origSize) { fprintf(stderr, "Output overflow while writing\n"); free(current); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+        memcpy(outBuf + outPos, current, curLen);
+        outPos += curLen;
 
-        // add previo + primera letra de nueva to dictionary
-        if (tamDict < LZW_MAX_DICT) {
-            strncpy(dic[tamDict].valor, previo, LZW_MAX_STR-1);
-            dic[tamDict].valor[LZW_MAX_STR-1] = '\0';
-            size_t lpv = strlen(dic[tamDict].valor);
-            if (lpv + 1 < LZW_MAX_STR) {
-                dic[tamDict].valor[lpv] = nueva[0];
-                dic[tamDict].valor[lpv+1] = '\0';
-            }
-            dic[tamDict].codigo = tamDict;
-            tamDict++;
+        // add prev + first byte of current to dictionary
+        if (dictSize < LZW_MAX_DICT) {
+            size_t newLen = prevLen + 1;
+            dict[dictSize].data = (unsigned char*)malloc(newLen);
+            if (!dict[dictSize].data) { perror("malloc dict entry"); free(current); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+            memcpy(dict[dictSize].data, prev, prevLen);
+            dict[dictSize].data[prevLen] = current[0];
+            dict[dictSize].len = newLen;
+            dict[dictSize].code = dictSize;
+            dictSize++;
         }
 
-        strncpy(previo, nueva, LZW_MAX_STR-1);
-        previo[LZW_MAX_STR-1] = '\0';
+        free(prev);
+        prev = current;
+        prevLen = curLen;
     }
 
-    // sanity check
     if (outPos != origSize) {
-        // It may still be valid for text files: allow <= origSize but warn
         if (outPos > origSize) {
             fprintf(stderr, "Decompressed size mismatch: expected %llu got %llu\n", (unsigned long long)origSize, (unsigned long long)outPos);
-            free(codes); free(outBuf); return 1;
+            free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1;
         }
     }
 
-    // write output
     FILE* out = fopen("File_Manager/output.txt", "wb");
-    if (!out) { perror("Cannot open File_Manager/output.txt"); free(codes); free(outBuf); return 1; }
+    if (!out) { perror("Cannot open File_Manager/output.txt"); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
     size_t written = fwrite(outBuf, 1, outPos, out);
     fclose(out);
 
+    free(prev);
     free(codes);
     free(outBuf);
+    freeDictionary(dict, dictSize);
     return (written == outPos) ? 0 : 1;
 }

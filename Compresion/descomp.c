@@ -4,7 +4,6 @@
 
 #include "huffman.h"
 
-int main(){
-    readHuffman("File_Manager/output.bin");
-    return 0;
-}
+// int main(){
+//     readHuffman("File_Manager/output.bin");
+//     return 0;
