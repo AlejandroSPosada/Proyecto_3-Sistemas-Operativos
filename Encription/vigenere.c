@@ -9,11 +9,11 @@ static void process_bytes(unsigned char* data, size_t length, const unsigned cha
     for (size_t i = 0; i < length; i++) {
         unsigned char k = key[i % keyLen];
         if (encrypt) {
-            // XOR encryption
-            data[i] = data[i] ^ k;
+            // Cifrado: (byte + clave) mod 256
+            data[i] = (data[i] + k) % 256;
         } else {
-            // XOR decryption (same operation)
-            data[i] = data[i] ^ k;
+            // Descifrado: (byte - clave + 256) mod 256
+            data[i] = (data[i] - k + 256) % 256;
         }
     }
 }
