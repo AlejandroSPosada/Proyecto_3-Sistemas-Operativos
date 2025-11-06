@@ -19,16 +19,14 @@ static void usage(const char* prog) {
         "  -d    Descomprimir\n"
         "  -e    Encriptar (Vigenère)\n"
         "  -u    Desencriptar (Vigenère)\n"
-        "  -ce   Comprimir y luego encriptar (limitado, ver nota)\n\n"
+        "  -ce   Comprimir y luego encriptar\n"
+        "  -ud   Desencriptar y luego descomprimir (inverso de -ce)\n\n"
         "Opciones:\n"
     "  --comp-alg [nombre]   Algoritmo de compresión (huffman, rle, lzw)\n"
         "  --enc-alg  [nombre]   Algoritmo de encriptación (vigenere)\n"
         "  -i [ruta]             Archivo de entrada\n"
         "  -o [ruta]             Archivo de salida\n"
-        "  -k [clave]            Clave para encriptar/desencriptar\n\n"
-        "Notas:\n"
-        "  - La encriptación Vigenère actual trabaja sobre texto (no binario).\n"
-        "  - La combinación -ce sobre .bin no está soportada por esta implementación.\n",
+        "  -k [clave]            Clave para encriptar/desencriptar\n\n",
         prog);
 }
 
@@ -131,13 +129,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Manejo de combinaciones: soportamos -ce de forma declarativa, pero advertimos limitación
+    // Manejo de combinaciones: soportamos -ce (comprimir + encriptar) y -ud (desencriptar + descomprimir)
     if (opsCount > 1) {
         if (op_c && op_e && !op_d && !op_u) {
-            fprintf(stderr, "Aviso: combinación -ce no implementada por limitación de Vigenère sobre binario.\n");
-            return 1;
+            // -ce es válido: comprimir primero, luego encriptar
+        } else if (op_u && op_d && !op_c && !op_e) {
+            // -ud es válido: desencriptar primero, luego descomprimir (inverso de -ce)
         } else {
-            fprintf(stderr, "Combinación de operaciones no soportada en esta versión.\n");
+            fprintf(stderr, "Combinación de operaciones no soportada. Use -ce o -ud\n");
             return 1;
         }
     }
@@ -151,7 +150,113 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Ejecutar operación individual
+    // Ejecutar operación individual o combinación
+    if (op_c && op_e) {
+        // Combinación -ce: comprimir primero, luego encriptar
+        if (!key) { fprintf(stderr, "-k [clave] es obligatorio para -ce\n"); return 1; }
+        
+        const char* compressedFile;
+        if (strcmp(compAlg, "huffman") == 0) {
+            writeHuffman((char*)inPath);
+            compressedFile = "File_Manager/output.bin";
+        } else if (strcmp(compAlg, "rle") == 0) {
+            writeRLE((char*)inPath);
+            compressedFile = "File_Manager/output.rle";
+        } else if (strcmp(compAlg, "lzw") == 0) {
+            writeLZW((char*)inPath);
+            compressedFile = "File_Manager/output.lzw";
+        } else {
+            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
+            return 1;
+        }
+        
+        if (!file_exists(compressedFile)) {
+            fprintf(stderr, "Error en compresión: %s\n", compressedFile);
+            return 1;
+        }
+        
+        // Ahora encriptar el archivo comprimido
+        char encryptedFile[512];
+        if (outPath) {
+            const char* base = get_basename(outPath);
+            snprintf(encryptedFile, sizeof(encryptedFile), "File_Manager/%s", base);
+        } else {
+            snprintf(encryptedFile, sizeof(encryptedFile), "File_Manager/output.enc");
+        }
+        
+        if (vigenere_encrypt_file(compressedFile, encryptedFile, key) != 0) {
+            fprintf(stderr, "Error encriptando archivo comprimido\n");
+            return 1;
+        }
+        
+        printf("Archivo comprimido y encriptado guardado en: %s\n", encryptedFile);
+        return 0;
+    }
+    
+    if (op_u && op_d) {
+        // Combinación -ud: desencriptar primero, luego descomprimir (inverso de -ce)
+        if (!key) { fprintf(stderr, "-k [clave] es obligatorio para -ud\n"); return 1; }
+        if (!file_exists(inPath)) {
+            fprintf(stderr, "Entrada no encontrada: %s\n", inPath);
+            return 1;
+        }
+        
+        // Paso 1: Desencriptar
+        const char* decryptedFile = "File_Manager/temp_decrypted.tmp";
+        if (vigenere_decrypt_file(inPath, decryptedFile, key) != 0) {
+            fprintf(stderr, "Error desencriptando archivo\n");
+            return 1;
+        }
+        
+        if (!file_exists(decryptedFile)) {
+            fprintf(stderr, "Error en desencriptación: %s\n", decryptedFile);
+            return 1;
+        }
+        
+        // Paso 2: Descomprimir el archivo desencriptado
+        int result;
+        if (strcmp(compAlg, "huffman") == 0) {
+            result = readHuffman((char*)decryptedFile);
+        } else if (strcmp(compAlg, "rle") == 0) {
+            result = readRLE((char*)decryptedFile);
+        } else if (strcmp(compAlg, "lzw") == 0) {
+            result = readLZW((char*)decryptedFile);
+        } else {
+            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
+            remove(decryptedFile);
+            return 1;
+        }
+        
+        // Limpiar archivo temporal
+        remove(decryptedFile);
+        
+        if (result != 0) {
+            fprintf(stderr, "Fallo al descomprimir\n");
+            return 1;
+        }
+        
+        const char* produced = "File_Manager/output.txt";
+        if (!file_exists(produced)) {
+            fprintf(stderr, "No se encontró salida de descompresión: %s\n", produced);
+            return 1;
+        }
+        
+        if (outPath) {
+            char dest[512];
+            const char* base = get_basename(outPath);
+            snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            if (strcmp(dest, produced) != 0) {
+                if (move_file(produced, dest) != 0) return 1;
+                printf("Archivo desencriptado y descomprimido guardado en: %s\n", dest);
+            } else {
+                printf("Archivo desencriptado y descomprimido guardado en: %s\n", produced);
+            }
+        } else {
+            printf("Archivo desencriptado y descomprimido guardado en: %s\n", produced);
+        }
+        return 0;
+    }
+    
     if (op_c) {
         // Compression: entrada -> File_Manager/output.[ext]
         const char* produced;
@@ -198,20 +303,6 @@ int main(int argc, char** argv) {
             return 1;
         }
         
-        // If no -o provided, try to read original name from metadata inside the compressed file
-        char originalName[MAX_FILENAME_LEN] = "";
-        if (!outPath) {
-            FILE* metaF = fopen(inPath, "rb");
-            if (metaF) {
-                FileMetadata meta;
-                if (fread(&meta, sizeof(meta), 1, metaF) == 1 && meta.magic == METADATA_MAGIC) {
-                    strncpy(originalName, meta.originalName, MAX_FILENAME_LEN-1);
-                    originalName[MAX_FILENAME_LEN-1] = '\0';
-                }
-                fclose(metaF);
-            }
-        }
-
         int result;
         if (strcmp(compAlg, "huffman") == 0) {
             result = readHuffman((char*)inPath);
@@ -244,36 +335,28 @@ int main(int argc, char** argv) {
                 printf("Archivo descomprimido guardado en: %s\n", produced);
             }
         } else {
-            if (originalName[0] != '\0') {
-                char dest[512];
-                snprintf(dest, sizeof(dest), "File_Manager/%s", originalName);
-                if (strcmp(dest, produced) != 0) {
-                    if (move_file(produced, dest) != 0) return 1;
-                    printf("Archivo descomprimido guardado en: %s\n", dest);
-                } else {
-                    printf("Archivo descomprimido guardado en: %s\n", produced);
-                }
-            } else {
-                printf("Archivo descomprimido guardado en: %s\n", produced);
-            }
+            printf("Archivo descomprimido guardado en: %s\n", produced);
         }
         return 0;
     }
 
     if (op_e) {
+        // Encriptar archivo (funciona con cualquier tipo de archivo: texto o binario)
+        if (!file_exists(inPath)) {
+            fprintf(stderr, "Entrada no encontrada: %s\n", inPath);
+            return 1;
+        }
+        
         char dest[512];
         if (outPath) {
             const char* base = get_basename(outPath);
             snprintf(dest, sizeof(dest), "File_Manager/%s", base);
         } else {
-            // Usar nombre original con .enc
-            const char* origName = get_basename(inPath);
-            snprintf(dest, sizeof(dest), "File_Manager/%s.enc", origName);
+            snprintf(dest, sizeof(dest), "File_Manager/output.enc");
         }
         
-        int result = vigenere_encrypt_file(inPath, dest, key);
-        if (result != 0) {
-            fprintf(stderr, "Error al encriptar el archivo\n");
+        if (vigenere_encrypt_file(inPath, dest, key) != 0) {
+            fprintf(stderr, "Error encriptando archivo\n");
             return 1;
         }
         
@@ -282,33 +365,22 @@ int main(int argc, char** argv) {
     }
 
     if (op_u) {
-        // Read metadata to get original filename
-        FILE* meta = fopen(inPath, "rb");
-        if (!meta) {
-            fprintf(stderr, "No se puede abrir el archivo encriptado: %s\n", inPath);
+        // Desencriptar archivo
+        if (!file_exists(inPath)) {
+            fprintf(stderr, "Entrada no encontrada: %s\n", inPath);
             return 1;
         }
-        
-        FileMetadata header;
-        if (fread(&header, sizeof(header), 1, meta) != 1 || header.magic != METADATA_MAGIC) {
-            fprintf(stderr, "Archivo encriptado inválido o corrupto\n");
-            fclose(meta);
-            return 1;
-        }
-        fclose(meta);
         
         char dest[512];
         if (outPath) {
             const char* base = get_basename(outPath);
             snprintf(dest, sizeof(dest), "File_Manager/%s", base);
         } else {
-            // Usar nombre original del archivo
-            snprintf(dest, sizeof(dest), "File_Manager/%s", header.originalName);
+            snprintf(dest, sizeof(dest), "File_Manager/output.txt");
         }
         
-        int result = vigenere_decrypt_file(inPath, dest, key);
-        if (result != 0) {
-            fprintf(stderr, "Error al desencriptar el archivo\n");
+        if (vigenere_decrypt_file(inPath, dest, key) != 0) {
+            fprintf(stderr, "Error desencriptando archivo\n");
             return 1;
         }
         
@@ -320,4 +392,3 @@ int main(int argc, char** argv) {
     usage(argv[0]);
     return 1;
 }
-// test
