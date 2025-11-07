@@ -9,6 +9,7 @@
 #include "rle.h"
 #include "vigenere.h"
 #include "lzw.h"
+#include "aes.h"
 #include "common.h"
 
 static void usage(const char* prog) {
@@ -23,7 +24,7 @@ static void usage(const char* prog) {
         "  -ud   Desencriptar y luego descomprimir (inverso de -ce)\n\n"
         "Opciones:\n"
     "  --comp-alg [nombre]   Algoritmo de compresión (huffman, rle, lzw)\n"
-        "  --enc-alg  [nombre]   Algoritmo de encriptación (vigenere)\n"
+        "  --enc-alg  [nombre]   Algoritmo de encriptación (vigenere, aes)\n"
         "  -i [ruta]             Archivo de entrada\n"
         "  -o [ruta]             Archivo de salida\n"
         "  -k [clave]            Clave para encriptar/desencriptar\n\n",
@@ -144,8 +145,8 @@ int main(int argc, char** argv) {
     // Validación de encriptación (luego de manejar combinaciones)
     if (op_e || op_u) {
         if (!key) { fprintf(stderr, "-k [clave] es obligatorio para -e/-u\n"); return 1; }
-        if (strcmp(encAlg, "vigenere") != 0) {
-            fprintf(stderr, "Algoritmo de encriptación no soportado: %s\n", encAlg);
+        if (strcmp(encAlg, "vigenere") != 0 && strcmp(encAlg, "aes") != 0) {
+            fprintf(stderr, "Algoritmo de encriptación no soportado: %s (use: vigenere o aes)\n", encAlg);
             return 1;
         }
     }
@@ -184,7 +185,18 @@ int main(int argc, char** argv) {
             snprintf(encryptedFile, sizeof(encryptedFile), "File_Manager/output.enc");
         }
         
-        if (vigenere_encrypt_file(compressedFile, encryptedFile, key) != 0) {
+        // Encriptar según el algoritmo seleccionado
+        int encResult;
+        if (strcmp(encAlg, "vigenere") == 0) {
+            encResult = vigenere_encrypt_file(compressedFile, encryptedFile, key);
+        } else if (strcmp(encAlg, "aes") == 0) {
+            encResult = aes_encrypt_file(compressedFile, encryptedFile, key);
+        } else {
+            fprintf(stderr, "Algoritmo de encriptación desconocido: %s\n", encAlg);
+            return 1;
+        }
+        
+        if (encResult != 0) {
             fprintf(stderr, "Error encriptando archivo comprimido\n");
             return 1;
         }
@@ -203,7 +215,18 @@ int main(int argc, char** argv) {
         
         // Paso 1: Desencriptar
         const char* decryptedFile = "File_Manager/temp_decrypted.tmp";
-        if (vigenere_decrypt_file(inPath, decryptedFile, key) != 0) {
+        
+        int decResult;
+        if (strcmp(encAlg, "vigenere") == 0) {
+            decResult = vigenere_decrypt_file(inPath, decryptedFile, key);
+        } else if (strcmp(encAlg, "aes") == 0) {
+            decResult = aes_decrypt_file(inPath, decryptedFile, key);
+        } else {
+            fprintf(stderr, "Algoritmo de encriptación desconocido: %s\n", encAlg);
+            return 1;
+        }
+        
+        if (decResult != 0) {
             fprintf(stderr, "Error desencriptando archivo\n");
             return 1;
         }
@@ -355,7 +378,17 @@ int main(int argc, char** argv) {
             snprintf(dest, sizeof(dest), "File_Manager/output.enc");
         }
         
-        if (vigenere_encrypt_file(inPath, dest, key) != 0) {
+        int encResult;
+        if (strcmp(encAlg, "vigenere") == 0) {
+            encResult = vigenere_encrypt_file(inPath, dest, key);
+        } else if (strcmp(encAlg, "aes") == 0) {
+            encResult = aes_encrypt_file(inPath, dest, key);
+        } else {
+            fprintf(stderr, "Algoritmo de encriptación desconocido: %s\n", encAlg);
+            return 1;
+        }
+        
+        if (encResult != 0) {
             fprintf(stderr, "Error encriptando archivo\n");
             return 1;
         }
@@ -379,7 +412,17 @@ int main(int argc, char** argv) {
             snprintf(dest, sizeof(dest), "File_Manager/output.txt");
         }
         
-        if (vigenere_decrypt_file(inPath, dest, key) != 0) {
+        int decResult;
+        if (strcmp(encAlg, "vigenere") == 0) {
+            decResult = vigenere_decrypt_file(inPath, dest, key);
+        } else if (strcmp(encAlg, "aes") == 0) {
+            decResult = aes_decrypt_file(inPath, dest, key);
+        } else {
+            fprintf(stderr, "Algoritmo de encriptación desconocido: %s\n", encAlg);
+            return 1;
+        }
+        
+        if (decResult != 0) {
             fprintf(stderr, "Error desencriptando archivo\n");
             return 1;
         }
