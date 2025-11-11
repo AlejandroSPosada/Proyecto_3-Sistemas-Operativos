@@ -48,6 +48,7 @@ static int move_file(const char* src, const char* dst) {
     return -1;
 }
 
+// ejemplo: ./app -c --comp-alg huffman -i File_Manager/input.txt -o salida.bin
 int main(int argc, char** argv) {
     bool op_c = false, op_d = false, op_e = false, op_u = false;
     const char* compAlg = "huffman";
