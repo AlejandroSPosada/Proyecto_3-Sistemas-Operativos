@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "vigenere.h"
+#include "../posix_utils.h"
 
 #define BUFFER_SIZE 8192
 
@@ -19,74 +25,80 @@ static void process_bytes(unsigned char* data, size_t length, const unsigned cha
 }
 
 static int process_file(const char* inputPath, const char* outputPath, const char* key, int encrypt) {
-    FILE* in = fopen(inputPath, "rb");
-    if (!in) {
-        fprintf(stderr, "Cannot open input file '%s': ", inputPath);
-        perror("");
+    // Abrir archivo de entrada con POSIX
+    int fd_input = posix_open_read(inputPath);
+    if (fd_input == -1) return 1;
+
+    // Obtener tamaño del archivo
+    off_t fileSize = posix_get_file_size(fd_input);
+    if (fileSize < 0) {
+        posix_close(fd_input);
         return 1;
     }
 
-    // Get file size and name for metadata
-    fseek(in, 0, SEEK_END);
-    long fileSize = ftell(in);
-    rewind(in);
-
-    FILE* out = fopen(outputPath, "wb");
-    if (!out) {
-        fprintf(stderr, "Cannot create output file '%s': ", outputPath);
-        perror("");
-        fclose(in);
+    // Abrir archivo de salida con POSIX
+    int fd_output = posix_open_write(outputPath);
+    if (fd_output == -1) {
+        posix_close(fd_input);
         return 1;
     }
 
     if (encrypt) {
-        // Write metadata for encrypted files
+        // Escribir metadata para archivos encriptados
         FileMetadata meta = {
             .magic = METADATA_MAGIC,
             .originalSize = fileSize,
-            .flags = 0  // Could add flags for encryption method
+            .flags = 0  // Podría agregar flags para método de encriptación
         };
         strncpy(meta.originalName, get_basename(inputPath), MAX_FILENAME_LEN-1);
         meta.originalName[MAX_FILENAME_LEN-1] = '\0';
         
-        if (fwrite(&meta, sizeof(meta), 1, out) != 1) {
+        if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
             fprintf(stderr, "Failed to write metadata\n");
-            fclose(in);
-            fclose(out);
+            posix_close(fd_input);
+            posix_close(fd_output);
             return 1;
         }
     } else {
-        // Read and verify metadata for decryption
+        // Leer y verificar metadata para desencriptación
         FileMetadata meta;
-        if (fread(&meta, sizeof(meta), 1, in) != 1 || meta.magic != METADATA_MAGIC) {
+        if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) ||
+            meta.magic != METADATA_MAGIC) {
             fprintf(stderr, "Invalid or corrupted encrypted file\n");
-            fclose(in);
-            fclose(out);
+            posix_close(fd_input);
+            posix_close(fd_output);
             return 1;
         }
-        fileSize -= sizeof(meta);  // Adjust for metadata size
+        fileSize -= sizeof(meta);  // Ajustar por tamaño de metadata
     }
 
-    // Process file in chunks
+    // Procesar archivo en bloques
     unsigned char buffer[BUFFER_SIZE];
     size_t keyLen = strlen(key);
     
-    while (!feof(in)) {
-        size_t bytesRead = fread(buffer, 1, BUFFER_SIZE, in);
-        if (bytesRead == 0) break;
+    while (1) {
+        ssize_t bytes_read = read(fd_input, buffer, BUFFER_SIZE);
+        if (bytes_read == -1) {
+            if (errno == EINTR) continue;
+            fprintf(stderr, "Read error: %s\n", strerror(errno));
+            posix_close(fd_input);
+            posix_close(fd_output);
+            return 1;
+        }
+        if (bytes_read == 0) break;  // EOF
         
-        process_bytes(buffer, bytesRead, (const unsigned char*)key, keyLen, encrypt);
+        process_bytes(buffer, bytes_read, (const unsigned char*)key, keyLen, encrypt);
         
-        if (fwrite(buffer, 1, bytesRead, out) != bytesRead) {
+        if (posix_write_full(fd_output, buffer, bytes_read) != bytes_read) {
             fprintf(stderr, "Write error\n");
-            fclose(in);
-            fclose(out);
+            posix_close(fd_input);
+            posix_close(fd_output);
             return 1;
         }
     }
 
-    fclose(in);
-    fclose(out);
+    posix_close(fd_input);
+    posix_close(fd_output);
     return 0;
 }
 

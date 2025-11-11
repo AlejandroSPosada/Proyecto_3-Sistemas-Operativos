@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "aes.h"
+#include "../posix_utils.h"
 
 // AES-256 constants
 #define Nb 4  // Number of columns (32-bit words) in the state (always 4 for AES)
@@ -381,33 +387,32 @@ static size_t remove_padding(const uint8_t* data, size_t dataLen) {
     return dataLen - paddingLen;
 }
 
-// Encrypt file
+// Encrypt file (POSIX VERSION)
 int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* password) {
-    FILE* in = fopen(inputPath, "rb");
-    if (!in) {
-        fprintf(stderr, "Cannot open input file '%s': ", inputPath);
-        perror("");
+    // Abrir archivo de entrada con POSIX
+    int fd_input = posix_open_read(inputPath);
+    if (fd_input == -1) return -1;
+    
+    off_t fileSize = posix_get_file_size(fd_input);
+    if (fileSize < 0) {
+        posix_close(fd_input);
         return -1;
     }
-    
-    fseek(in, 0, SEEK_END);
-    long fileSize = ftell(in);
-    rewind(in);
     
     uint8_t* fileData = (uint8_t*)malloc(fileSize + AES_BLOCK_SIZE);
     if (!fileData) {
         fprintf(stderr, "Memory allocation failed\n");
-        fclose(in);
+        posix_close(fd_input);
         return -1;
     }
     
-    if (fread(fileData, 1, fileSize, in) != (size_t)fileSize) {
+    if (posix_read_full(fd_input, fileData, fileSize) != fileSize) {
         fprintf(stderr, "Failed to read file\n");
         free(fileData);
-        fclose(in);
+        posix_close(fd_input);
         return -1;
     }
-    fclose(in);
+    posix_close(fd_input);
     
     size_t paddedSize = add_padding(fileData, fileSize, fileSize + AES_BLOCK_SIZE);
     if (paddedSize == 0) {
@@ -433,10 +438,9 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
         AES_Encrypt_Block(fileData + i, encrypted + i, expandedKey);
     }
     
-    FILE* out = fopen(outputPath, "wb");
-    if (!out) {
-        fprintf(stderr, "Cannot create output file '%s': ", outputPath);
-        perror("");
+    // Abrir archivo de salida con POSIX
+    int fd_output = posix_open_write(outputPath);
+    if (fd_output == -1) {
         free(fileData);
         free(encrypted);
         return -1;
@@ -450,23 +454,23 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     strncpy(meta.originalName, get_basename(inputPath), MAX_FILENAME_LEN - 1);
     meta.originalName[MAX_FILENAME_LEN - 1] = '\0';
     
-    if (fwrite(&meta, sizeof(meta), 1, out) != 1) {
+    if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
         fprintf(stderr, "Failed to write metadata\n");
-        fclose(out);
+        posix_close(fd_output);
         free(fileData);
         free(encrypted);
         return -1;
     }
     
-    if (fwrite(encrypted, 1, paddedSize, out) != paddedSize) {
+    if (posix_write_full(fd_output, encrypted, paddedSize) != (ssize_t)paddedSize) {
         fprintf(stderr, "Failed to write encrypted data\n");
-        fclose(out);
+        posix_close(fd_output);
         free(fileData);
         free(encrypted);
         return -1;
     }
     
-    fclose(out);
+    posix_close(fd_output);
     free(fileData);
     free(encrypted);
     
@@ -478,45 +482,48 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
 
 // Decrypt file
 int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* password) {
-    FILE* in = fopen(inputPath, "rb");
-    if (!in) {
-        fprintf(stderr, "Cannot open input file '%s': ", inputPath);
-        perror("");
+    int fd_input = posix_open_read(inputPath);
+    if (fd_input < 0) {
+        fprintf(stderr, "Cannot open input file '%s': %s\n", inputPath, strerror(errno));
         return -1;
     }
     
     FileMetadata meta;
-    if (fread(&meta, sizeof(meta), 1, in) != 1 || meta.magic != METADATA_MAGIC) {
+    if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) || meta.magic != METADATA_MAGIC) {
         fprintf(stderr, "Invalid or corrupted encrypted file\n");
-        fclose(in);
+        posix_close(fd_input);
         return -1;
     }
     
-    fseek(in, 0, SEEK_END);
-    long totalSize = ftell(in);
+    off_t totalSize = posix_get_file_size(fd_input);
+    if (totalSize < 0) {
+        fprintf(stderr, "Failed to get file size\n");
+        posix_close(fd_input);
+        return -1;
+    }
+    
     long encryptedSize = totalSize - sizeof(meta);
-    fseek(in, sizeof(meta), SEEK_SET);
     
     if (encryptedSize <= 0 || encryptedSize % AES_BLOCK_SIZE != 0) {
         fprintf(stderr, "Invalid encrypted data size\n");
-        fclose(in);
+        posix_close(fd_input);
         return -1;
     }
     
     uint8_t* encrypted = (uint8_t*)malloc(encryptedSize);
     if (!encrypted) {
         fprintf(stderr, "Memory allocation failed\n");
-        fclose(in);
+        posix_close(fd_input);
         return -1;
     }
     
-    if (fread(encrypted, 1, encryptedSize, in) != (size_t)encryptedSize) {
+    if (posix_read_full(fd_input, encrypted, encryptedSize) != encryptedSize) {
         fprintf(stderr, "Failed to read encrypted data\n");
         free(encrypted);
-        fclose(in);
+        posix_close(fd_input);
         return -1;
     }
-    fclose(in);
+    posix_close(fd_input);
     
     uint8_t key[AES_KEY_SIZE];
     derive_key_from_password(password, key);
@@ -543,24 +550,23 @@ int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* 
         return -1;
     }
     
-    FILE* out = fopen(outputPath, "wb");
-    if (!out) {
-        fprintf(stderr, "Cannot create output file '%s': ", outputPath);
-        perror("");
+    int fd_output = posix_open_write(outputPath);
+    if (fd_output < 0) {
+        fprintf(stderr, "Cannot create output file '%s': %s\n", outputPath, strerror(errno));
         free(encrypted);
         free(decrypted);
         return -1;
     }
     
-    if (fwrite(decrypted, 1, originalSize, out) != originalSize) {
+    if (posix_write_full(fd_output, decrypted, originalSize) != (ssize_t)originalSize) {
         fprintf(stderr, "Failed to write decrypted data\n");
-        fclose(out);
+        posix_close(fd_output);
         free(encrypted);
         free(decrypted);
         return -1;
     }
     
-    fclose(out);
+    posix_close(fd_output);
     free(encrypted);
     free(decrypted);
     

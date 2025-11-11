@@ -2,11 +2,57 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "huffman.h"
 #include "../common.h"
+#include "../posix_utils.h"
 
 #define MAX_TREE_HT 512
 #define MAX_CHARS 256
+
+// ===== BitWriter para POSIX =====
+typedef struct {
+    int fd;              // File descriptor en lugar de FILE*
+    uint8_t buffer;      // Buffer de 1 byte
+    int bitCount;        // Bits usados en el buffer (0-7)
+    int totalBits;       // Total de bits escritos
+} BitWriter_POSIX;
+
+// Inicializar BitWriter con file descriptor
+static void bitwriter_init_posix(BitWriter_POSIX* bw, int fd) {
+    bw->fd = fd;
+    bw->buffer = 0;
+    bw->bitCount = 0;
+    bw->totalBits = 0;
+}
+
+// Escribir un bit
+static void bitwriter_write_bit_posix(BitWriter_POSIX* bw, int bit) {
+    bw->buffer <<= 1;
+    if (bit) bw->buffer |= 1;
+    bw->bitCount++;
+    bw->totalBits++;
+    
+    if (bw->bitCount == 8) {
+        posix_write_full(bw->fd, &bw->buffer, 1);
+        bw->buffer = 0;
+        bw->bitCount = 0;
+    }
+}
+
+// Flush bits pendientes
+static void bitwriter_flush_posix(BitWriter_POSIX* bw) {
+    if (bw->bitCount > 0) {
+        bw->buffer <<= (8 - bw->bitCount);
+        posix_write_full(bw->fd, &bw->buffer, 1);
+        bw->buffer = 0;
+        bw->bitCount = 0;
+    }
+}
 
 // ----- Node structure -----
 struct MinHeapNode* newNode(char data, unsigned freq) {
@@ -199,37 +245,32 @@ void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]) 
 }
 
 // --- Write in .bin ---
+// --- Write in .bin (POSIX VERSION) ---
 void writeHuffman(char inputFile[]) {
-    FILE* input = fopen(inputFile, "rb");
-    if (!input) { 
-        fprintf(stderr, "Cannot open input file '%s': ", inputFile);
-        perror("");
-        return; 
-    }
+    // Abrir archivo de entrada con POSIX
+    int fd_input = posix_open_read(inputFile);
+    if (fd_input == -1) return;
 
-    // Get file size
-    fseek(input, 0, SEEK_END);
-    long fileSize = ftell(input);
-    rewind(input);
-    
+    // Obtener tamaño del archivo
+    off_t fileSize = posix_get_file_size(fd_input);
     if (fileSize <= 0) {
         fprintf(stderr, "File '%s' is empty or invalid\n", inputFile);
-        fclose(input);
+        posix_close(fd_input);
         return;
     }
 
-    // Allocate buffer for entire file
+    // Allocar buffer para todo el archivo
     char* arr = (char*)malloc(fileSize);
     if (!arr) {
-        perror("malloc file buffer");
-        fclose(input);
+        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        posix_close(fd_input);
         return;
     }
     
-    size_t len = fread(arr, 1, fileSize, input);
-    fclose(input);
+    ssize_t bytes_read = posix_read_full(fd_input, arr, fileSize);
+    posix_close(fd_input);
 
-    if (len == 0) {
+    if (bytes_read != fileSize) {
         fprintf(stderr, "Failed to read from '%s'\n", inputFile);
         free(arr);
         return;
@@ -237,7 +278,7 @@ void writeHuffman(char inputFile[]) {
 
     uint32_t freq[MAX_CHARS] = {0};
 
-    for (size_t i = 0; i < len; i++)
+    for (ssize_t i = 0; i < bytes_read; i++)
         freq[(unsigned char)arr[i]]++;
 
     char chars[MAX_CHARS];
@@ -266,75 +307,85 @@ void writeHuffman(char inputFile[]) {
     }
     HuffmanCodes(chars, freqs_int, size, codes);
 
-    // Encode text into bits
-    unsigned char buffer = 0;
-    int bitCount = 0;
-    int totalBits = 0;
-
-    FILE* out = fopen("File_Manager/output.bin", "wb");
-    if (!out) { 
-        perror("Cannot open File_Manager/output.bin"); 
+    // Abrir archivo de salida con POSIX
+    int fd_output = posix_open_write("File_Manager/output.bin");
+    if (fd_output == -1) {
         free(arr);
-        return; 
+        return;
     }
 
-    // Write metadata header
+    // Escribir metadata header
     FileMetadata meta = {0};
     meta.magic = METADATA_MAGIC;
-    meta.originalSize = (uint64_t)len;
+    meta.originalSize = (uint64_t)bytes_read;
     meta.flags = 0;
     strncpy(meta.originalName, get_basename(inputFile), MAX_FILENAME_LEN-1);
     meta.originalName[MAX_FILENAME_LEN-1] = '\0';
-    fwrite(&meta, sizeof(meta), 1, out);
-
-    // Write header with fixed-size types
-    fwrite(&size, sizeof(uint32_t), 1, out);
-    for (uint32_t i = 0; i < size; i++) {
-        fwrite(&chars[i], sizeof(char), 1, out);
-        fwrite(&freqs[i], sizeof(uint32_t), 1, out);
+    
+    if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
+        fprintf(stderr, "Failed to write metadata\n");
+        posix_close(fd_output);
+        free(arr);
+        return;
     }
 
-    // Reserve space for totalBits (we'll overwrite later)
-    long bitCountPos = ftell(out);
-    uint32_t placeholder = 0;
-    fwrite(&placeholder, sizeof(uint32_t), 1, out);
-
-    for (size_t i = 0; i < len; i++) {
-        char* code = codes[(unsigned char)arr[i]];
-        for (int j = 0; code[j] != '\0'; j++) {
-            buffer <<= 1;
-            if (code[j] == '1') buffer |= 1;
-            bitCount++;
-            totalBits++;
-            if (bitCount == 8) {
-                fwrite(&buffer, 1, 1, out);
-                buffer = 0;
-                bitCount = 0;
-            }
+    // Escribir header con tipos de tamaño fijo
+    if (posix_write_full(fd_output, &size, sizeof(uint32_t)) != sizeof(uint32_t)) {
+        fprintf(stderr, "Failed to write size\n");
+        posix_close(fd_output);
+        free(arr);
+        return;
+    }
+    
+    for (uint32_t i = 0; i < size; i++) {
+        if (posix_write_full(fd_output, &chars[i], sizeof(char)) != sizeof(char) ||
+            posix_write_full(fd_output, &freqs[i], sizeof(uint32_t)) != sizeof(uint32_t)) {
+            fprintf(stderr, "Failed to write char/freq\n");
+            posix_close(fd_output);
+            free(arr);
+            return;
         }
     }
 
-    if (bitCount > 0) {
-        buffer <<= (8 - bitCount);
-        fwrite(&buffer, 1, 1, out);
+    // Guardar posición para totalBits (lo sobreescribiremos después)
+    off_t bitCountPos = lseek(fd_output, 0, SEEK_CUR);
+    uint32_t placeholder = 0;
+    posix_write_full(fd_output, &placeholder, sizeof(uint32_t));
+
+    // Inicializar BitWriter con POSIX
+    BitWriter_POSIX bw;
+    bitwriter_init_posix(&bw, fd_output);
+
+    // Codificar texto en bits
+    for (ssize_t i = 0; i < bytes_read; i++) {
+        char* code = codes[(unsigned char)arr[i]];
+        for (int j = 0; code[j] != '\0'; j++) {
+            bitwriter_write_bit_posix(&bw, code[j] == '1' ? 1 : 0);
+        }
     }
 
-    // Write totalBits value
-    fseek(out, bitCountPos, SEEK_SET);
-    fwrite(&totalBits, sizeof(uint32_t), 1, out);
+    // Flush bits pendientes
+    bitwriter_flush_posix(&bw);
+    int totalBits = bw.totalBits;
 
-    fclose(out);
+    // Escribir totalBits en la posición reservada
+    lseek(fd_output, bitCountPos, SEEK_SET);
+    posix_write_full(fd_output, &totalBits, sizeof(uint32_t));
+
+    posix_close(fd_output);
     free(arr);
 }
 
 // ---- Decompress function ----
-void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBits, FILE* outTxt) {
+// ---- Decompress function (POSIX VERSION) ----
+void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBits, int fd_output) {
     if (!root) return;
     
     // Handle single character case
     if (!root->left && !root->right) {
         for (int i = 0; i < dataSizeBits; i++) {
-            fputc(root->data, outTxt);
+            unsigned char ch = (unsigned char)root->data;
+            posix_write_full(fd_output, &ch, 1);
         }
         return;
     }
@@ -357,38 +408,37 @@ void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBi
         }
 
         if (isLeaf(current)) {
-            fputc(current->data, outTxt);
+            unsigned char ch = (unsigned char)current->data;
+            posix_write_full(fd_output, &ch, 1);
             current = root;
         }
     }
 }
 
-int readHuffman(char arr[] ) {
-    FILE* in = fopen(arr, "rb");
-    if (!in) {
-        fprintf(stderr, "Cannot open file '%s': ", arr);
-        perror("");
-        return 1;
-    }
+int readHuffman(char arr[]) {
+    // Abrir archivo comprimido con POSIX
+    int fd_input = posix_open_read(arr);
+    if (fd_input == -1) return 1;
 
-    // Read metadata header
+    // Leer metadata header
     FileMetadata meta;
-    if (fread(&meta, sizeof(meta), 1, in) != 1 || meta.magic != METADATA_MAGIC) {
+    if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) ||
+        meta.magic != METADATA_MAGIC) {
         fprintf(stderr, "Invalid or missing metadata in compressed file\n");
-        fclose(in);
+        posix_close(fd_input);
         return 1;
     }
 
     uint32_t size;
-    if (fread(&size, sizeof(uint32_t), 1, in) != 1) {
-        perror("fread size");
-        fclose(in);
+    if (posix_read_full(fd_input, &size, sizeof(uint32_t)) != sizeof(uint32_t)) {
+        fprintf(stderr, "Failed to read size\n");
+        posix_close(fd_input);
         return 1;
     }
 
     if (size == 0 || size > MAX_CHARS) {
         fprintf(stderr, "Invalid size in compressed file: %u\n", size);
-        fclose(in);
+        posix_close(fd_input);
         return 1;
     }
 
@@ -396,70 +446,67 @@ int readHuffman(char arr[] ) {
     uint32_t* freqs = (uint32_t*)malloc(size * sizeof(uint32_t));
     
     if (!chars || !freqs) {
-        perror("malloc for chars/freqs");
+        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
         free(chars);
         free(freqs);
-        fclose(in);
+        posix_close(fd_input);
         return 1;
     }
 
     for (uint32_t i = 0; i < size; i++) {
-        if (fread(&chars[i], sizeof(char), 1, in) != 1) {
-            perror("fread char");
-            fclose(in);
+        if (posix_read_full(fd_input, &chars[i], sizeof(char)) != sizeof(char)) {
+            fprintf(stderr, "Failed to read char\n");
+            posix_close(fd_input);
             free(chars); free(freqs);
             return 1;
         }
-        if (fread(&freqs[i], sizeof(uint32_t), 1, in) != 1) {
-            perror("fread freq");
-            fclose(in);
+        if (posix_read_full(fd_input, &freqs[i], sizeof(uint32_t)) != sizeof(uint32_t)) {
+            fprintf(stderr, "Failed to read freq\n");
+            posix_close(fd_input);
             free(chars); free(freqs);
             return 1;
         }
     }
 
-    // Read totalBits
+    // Leer totalBits
     uint32_t totalBits;
-    if (fread(&totalBits, sizeof(uint32_t), 1, in) != 1) {
-        perror("fread totalBits");
-        fclose(in);
+    if (posix_read_full(fd_input, &totalBits, sizeof(uint32_t)) != sizeof(uint32_t)) {
+        fprintf(stderr, "Failed to read totalBits\n");
+        posix_close(fd_input);
         free(chars); free(freqs);
         return 1;
     }
 
-    // Read encoded data
-    fseek(in, 0, SEEK_END);
-    long endPos = ftell(in);
-    long dataStart = sizeof(meta) + sizeof(uint32_t) + size * (sizeof(char) + sizeof(uint32_t)) + sizeof(uint32_t);
-    long bytesToRead = endPos - dataStart;
+    // Calcular cuántos bytes de datos codificados quedan
+    off_t fileSize = posix_get_file_size(fd_input);
+    off_t dataStart = sizeof(meta) + sizeof(uint32_t) + size * (sizeof(char) + sizeof(uint32_t)) + sizeof(uint32_t);
+    off_t bytesToRead = fileSize - dataStart;
     
     if (bytesToRead <= 0) {
         fprintf(stderr, "Invalid compressed file format\n");
-        fclose(in);
+        posix_close(fd_input);
         free(chars); free(freqs);
         return 1;
     }
-    
-    fseek(in, dataStart, SEEK_SET);
 
     unsigned char* encodedData = (unsigned char*)malloc(bytesToRead);
     if (!encodedData) {
-        perror("malloc encodedData");
-        fclose(in);
+        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        posix_close(fd_input);
         free(chars); free(freqs);
         return 1;
     }
     
-    size_t rd = fread(encodedData, 1, bytesToRead, in);
-    if (rd != (size_t)bytesToRead) {
-        perror("fread encodedData");
-        fclose(in);
+    ssize_t bytes_read = posix_read_full(fd_input, encodedData, bytesToRead);
+    posix_close(fd_input);
+    
+    if (bytes_read != bytesToRead) {
+        fprintf(stderr, "Failed to read encoded data\n");
         free(chars); free(freqs); free(encodedData);
         return 1;
     }
-    fclose(in);
 
-    // Rebuild tree - convert uint32_t to int
+    // Reconstruir árbol - convertir uint32_t a int
     int freqs_int[MAX_CHARS];
     for (uint32_t i = 0; i < size; i++) {
         freqs_int[i] = (int)freqs[i];
@@ -472,17 +519,17 @@ int readHuffman(char arr[] ) {
         return 1;
     }
 
-    // Decode using totalBits
-    FILE* outTxt = fopen("File_Manager/output.txt", "w");
-    if (!outTxt) {
-        perror("Cannot open File_Manager/output.txt");
+    // Abrir archivo de salida con POSIX
+    int fd_output = posix_open_write("File_Manager/output.txt");
+    if (fd_output == -1) {
         freeHuffmanTree(root);
         free(chars); free(freqs); free(encodedData);
         return 1;
     }
     
-    decodeHuffman(root, encodedData, totalBits, outTxt);
-    fclose(outTxt);
+    // Decodificar usando totalBits
+    decodeHuffman(root, encodedData, totalBits, fd_output);
+    posix_close(fd_output);
 
     freeHuffmanTree(root);
     free(chars);
