@@ -57,6 +57,14 @@
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
   "files.associations": {
-    "vigenere.h": "c"
+    "vigenere.h": "c",
+    "multifeature.h": "c",
+    "stdbool.h": "c",
+    "stdlib.h": "c",
+    "stdio.h": "c",
+    "stat.h": "c",
+    "errno.h": "c",
+    "string.h": "c",
+    "rle.h": "c"
   }
 }
