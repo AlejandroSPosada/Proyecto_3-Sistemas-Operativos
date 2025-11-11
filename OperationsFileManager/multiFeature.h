@@ -3,11 +3,17 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include "../common.h"
+#include "huffman.h"
+#include "rle.h"
+#include "vigenere.h"
+#include "lzw.h"
+#include "aes.h"
 
 // this header is in charge of the interaction of the user with the File_Manager, and also the multithread feature.
 

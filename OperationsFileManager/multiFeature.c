@@ -1,17 +1,4 @@
 #include "multiFeature.h"
-#include <stdio.h>
-#include <string.h>
-#include <pthread.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include "common.h"
-#include "huffman.h"
-#include "rle.h"
-#include "vigenere.h"
-#include "lzw.h"
-#include "aes.h"
 
 void* operationOneFile(void* arg) {
     struct ThreadArgs* args = (struct ThreadArgs*)arg;
