@@ -1,5 +1,6 @@
 #include "multiFeature.h"
 
+
 void* operationOneFile(void* arg) {
     struct ThreadArgs* args = (struct ThreadArgs*)arg;
     bool op_c = args->op_c;
@@ -295,27 +296,105 @@ void* operationOneFile(void* arg) {
     return NULL;
 }
 
-static bool is_dir(const char* path) {
-    struct stat st;
-    if (stat(path, &st) != 0) return false;
-    return S_ISDIR(st.st_mode);
-}
 
 static bool file_exists(const char* path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-static int move_file(const char* src, const char* dst) {
-    if (rename(src, dst) == 0) return 0;
-    perror("rename");
-    return -1;
+static int move_file(const char* src, const char* dst_folder) {
+    struct stat st;
+    if (stat(dst_folder, &st) == 0 && S_ISDIR(st.st_mode)) {
+        // dst_folder is a directory, append filename
+        const char* base = get_basename(src);
+        char full_dst[1024];
+        snprintf(full_dst, sizeof(full_dst), "%s/%s", dst_folder, base);
+        if (rename(src, full_dst) == 0) return 0;
+        perror("rename");
+        return -1;
+    } else {
+        // dst_folder is treated as file
+        if (rename(src, dst_folder) == 0) return 0;
+        perror("rename");
+        return -1;
+    }
 }
 
-void initOperation(ThreadArgs myargs){
-    pthread_t thread1;
-    pthread_create(&thread1, NULL, operationOneFile, &myargs);
+/*
+Here we start with the interaction with File_Manager. 
+First let's realize if we are dealing with a file or a folder. 
+If only a file, then only a thread. If a folder, then let's use several threads.
+*/
+void initOperation(ThreadArgs myargs) {
+    const char *path = myargs.inPath;
+    struct stat st;
 
-    // Wait for thread to finish
-    pthread_join(thread1, NULL);
+    if (stat(path, &st) != 0) {
+        perror("Error accessing path");
+        return;
+    }
+
+    if (S_ISREG(st.st_mode)) {
+        printf("It is a file.\n");
+        pthread_t thread1;
+        pthread_create(&thread1, NULL, operationOneFile, &myargs);
+        pthread_join(thread1, NULL);
+        return;
+    } else if (S_ISDIR(st.st_mode)) {
+        printf("It is a folder.\n");
+
+        // Create output folder
+        char outFolder[1024];
+        snprintf(outFolder, sizeof(outFolder), "%s_processed", path);
+        mkdir(outFolder, 0755);
+
+        // Open directory
+        DIR *dir = opendir(path);
+        if (!dir) { perror("Error opening directory"); return; }
+
+        struct dirent *entry;
+        pthread_t threads[8];
+        ThreadArgs args[8];  // store args per thread
+        int batch_count = 0;
+
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+                continue;
+
+            char full_path[1024];
+            snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+
+            struct stat entry_st;
+            if (stat(full_path, &entry_st) != 0 || !S_ISREG(entry_st.st_mode))
+                continue;
+
+            // Copy args for this file
+            args[batch_count] = myargs; 
+            args[batch_count].inPath = strdup(full_path); // each thread needs its own string
+            args[batch_count].outPath = strdup(outFolder); // optionally modify per file if needed
+
+            pthread_create(&threads[batch_count], NULL, operationOneFile, &args[batch_count]);
+            batch_count++;
+
+            // If 8 threads created, wait for them
+            if (batch_count == 8) {
+                for (int i = 0; i < 8; i++) pthread_join(threads[i], NULL);
+                // free strings
+                for (int i = 0; i < 8; i++) { free((char*)args[i].inPath); free((char*)args[i].outPath); }
+                batch_count = 0;
+            }
+        }
+
+        // Join remaining threads in the last batch
+        for (int i = 0; i < batch_count; i++) {
+            pthread_join(threads[i], NULL);
+            free((char*)args[i].inPath);
+            free((char*)args[i].outPath);
+        }
+
+        closedir(dir);
+        printf("Folder processing done.\n");
+    } else {
+        printf("It is neither a regular file nor a directory.\n");
+    }
 }

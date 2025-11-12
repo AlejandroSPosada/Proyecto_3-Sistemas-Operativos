@@ -11,7 +11,7 @@
 #include "lzw.h"
 #include "aes.h"
 #include "common.h"
-#include "multiFeature.h"
+#include "OperationsFileManager/multiFeature.h"
 
 static void usage(const char* prog) {
     fprintf(stderr,
@@ -32,14 +32,25 @@ static void usage(const char* prog) {
         prog);
 }
 
-// ejemplo: ./app -c --comp-alg huffman -i File_Manager/input.txt -o salida.bin
+static bool is_dir(const char* path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+}
+
+/*
+ejemplo: ./app -c --comp-alg huffman -i File_Manager/input.txt -o salida.bin
+
+Before of using OperationsFileManager, that helps us to interact with File_Manager,
+let's find out if the input parameters from the user are valid.
+*/
 int main(int argc, char** argv) {
     bool op_c = false, op_d = false, op_e = false, op_u = false;
-    const char* compAlg = "huffman";
-    const char* encAlg  = "vigenere";
-    const char* inPath = NULL;
-    const char* outPath = NULL;
-    const char* key = NULL;
+    char* compAlg = "huffman";
+    char* encAlg  = "vigenere";
+    char* inPath = NULL;
+    char* outPath = NULL;
+    char* key = NULL;
 
     if (argc <= 1) {
         usage(argv[0]);
@@ -98,10 +109,6 @@ int main(int argc, char** argv) {
 
     // Validaciones básicas
     if (!inPath) { fprintf(stderr, "Falta -i [ruta_entrada]\n"); return 1; }
-    if (is_dir(inPath)) {
-        fprintf(stderr, "Directorio como entrada aún no implementado: %s\n", inPath);
-        return 1;
-    }
     if (op_c || op_d) {
         if (strcmp(compAlg, "huffman") != 0 && strcmp(compAlg, "rle") != 0 && strcmp(compAlg, "lzw") != 0) {
             fprintf(stderr, "Algoritmo de compresión no soportado: %s (use: huffman, rle o lzw)\n", compAlg);
@@ -140,6 +147,7 @@ int main(int argc, char** argv) {
     ThreadArgs myargs = {op_c, op_d, op_e, op_u, compAlg, encAlg, inPath, outPath, key};
     initOperation(myargs);
 
+    return 0;
     // No debería llegar aquí
     usage(argv[0]);
     return 1;

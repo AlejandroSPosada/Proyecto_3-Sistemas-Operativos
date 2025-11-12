@@ -14,6 +14,7 @@
 #include "vigenere.h"
 #include "lzw.h"
 #include "aes.h"
+#include <dirent.h>
 
 // this header is in charge of the interaction of the user with the File_Manager, and also the multithread feature.
 
@@ -29,8 +30,9 @@ typedef struct ThreadArgs{
     char* key;
 } ThreadArgs;
 
-static bool is_dir(const char* path);
+
 static bool file_exists(const char* path);
+void get_file_base(const char* filepath, char* base, size_t size);
 static int move_file(const char* src, const char* dst);
 void* operationOneFile(void* arg);
 void initOperation(ThreadArgs p);
