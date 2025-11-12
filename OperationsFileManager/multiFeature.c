@@ -1,4 +1,9 @@
 #include "multiFeature.h"
+#include <fcntl.h>
+#include <unistd.h>
+
+// forward declaration
+static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size);
 
 
 void* operationOneFile(void* arg) {
@@ -41,8 +46,13 @@ void* operationOneFile(void* arg) {
         // Ahora encriptar el archivo comprimido
         char encryptedFile[512];
         if (outPath) {
-            const char* base = get_basename(outPath);
-            snprintf(encryptedFile, sizeof(encryptedFile), "File_Manager/%s", base);
+            // if outPath looks like a path (contains '/'), use it as-is; otherwise treat as basename under File_Manager
+            if (strchr(outPath, '/') != NULL) {
+                snprintf(encryptedFile, sizeof(encryptedFile), "%s", outPath);
+            } else {
+                const char* base = get_basename(outPath);
+                snprintf(encryptedFile, sizeof(encryptedFile), "File_Manager/%s", base);
+            }
         } else {
             snprintf(encryptedFile, sizeof(encryptedFile), "File_Manager/output.enc");
         }
@@ -128,8 +138,12 @@ void* operationOneFile(void* arg) {
         
         if (outPath) {
             char dest[512];
-            const char* base = get_basename(outPath);
-            snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            if (strchr(outPath, '/') != NULL) {
+                snprintf(dest, sizeof(dest), "%s", outPath);
+            } else {
+                const char* base = get_basename(outPath);
+                snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            }
             if (strcmp(dest, produced) != 0) {
                 if (move_file(produced, dest) != 0) return NULL;
                 printf("Archivo desencriptado y descomprimido guardado en: %s\n", dest);
@@ -167,8 +181,12 @@ void* operationOneFile(void* arg) {
         }
         if (outPath) {
             char dest[512];
-            const char* base = get_basename(outPath);
-            snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            if (strchr(outPath, '/') != NULL) {
+                snprintf(dest, sizeof(dest), "%s", outPath);
+            } else {
+                const char* base = get_basename(outPath);
+                snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            }
             if (strcmp(dest, produced) != 0) {
                 if (move_file(produced, dest) != 0) return NULL;
                 printf("Archivo comprimido guardado en: %s\n", dest);
@@ -209,18 +227,46 @@ void* operationOneFile(void* arg) {
             fprintf(stderr, "No se encontró salida de descompresión: %s\n", produced);
             return NULL;
         }
-        if (outPath) {
-            char dest[512];
-            const char* base = get_basename(outPath);
-            snprintf(dest, sizeof(dest), "File_Manager/%s", base);
-            if (strcmp(dest, produced) != 0) {
-                if (move_file(produced, dest) != 0) return NULL;
-                printf("Archivo descomprimido guardado en: %s\n", dest);
+
+        // Try to read original filename from compressed input and restore it
+        char original_name[512];
+        int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
+
+        if (have_original) {
+            // determine output folder: if outPath contains '/', use its directory; otherwise default to File_Manager
+            char folder[1024];
+            if (outPath && strchr(outPath, '/') != NULL) {
+                const char* last = strrchr(outPath, '/');
+                size_t len = last - outPath;
+                if (len >= sizeof(folder)) len = sizeof(folder) - 1;
+                strncpy(folder, outPath, len);
+                folder[len] = '\0';
+            } else {
+                strncpy(folder, "File_Manager", sizeof(folder)); folder[sizeof(folder)-1] = '\0';
+            }
+
+            char dest[1536];
+            snprintf(dest, sizeof(dest), "%s/%s", folder, get_basename(original_name));
+            if (move_file(produced, dest) != 0) return NULL;
+            printf("Archivo descomprimido guardado en: %s\n", dest);
+        } else {
+            if (outPath) {
+                char dest[512];
+                if (strchr(outPath, '/') != NULL) {
+                    snprintf(dest, sizeof(dest), "%s", outPath);
+                } else {
+                    const char* base = get_basename(outPath);
+                    snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+                }
+                if (strcmp(dest, produced) != 0) {
+                    if (move_file(produced, dest) != 0) return NULL;
+                    printf("Archivo descomprimido guardado en: %s\n", dest);
+                } else {
+                    printf("Archivo descomprimido guardado en: %s\n", produced);
+                }
             } else {
                 printf("Archivo descomprimido guardado en: %s\n", produced);
             }
-        } else {
-            printf("Archivo descomprimido guardado en: %s\n", produced);
         }
         return NULL;
     }
@@ -234,8 +280,12 @@ void* operationOneFile(void* arg) {
         
         char dest[512];
         if (outPath) {
-            const char* base = get_basename(outPath);
-            snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            if (strchr(outPath, '/') != NULL) {
+                snprintf(dest, sizeof(dest), "%s", outPath);
+            } else {
+                const char* base = get_basename(outPath);
+                snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            }
         } else {
             snprintf(dest, sizeof(dest), "File_Manager/output.enc");
         }
@@ -268,8 +318,12 @@ void* operationOneFile(void* arg) {
         
         char dest[512];
         if (outPath) {
-            const char* base = get_basename(outPath);
-            snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            if (strchr(outPath, '/') != NULL) {
+                snprintf(dest, sizeof(dest), "%s", outPath);
+            } else {
+                const char* base = get_basename(outPath);
+                snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+            }
         } else {
             snprintf(dest, sizeof(dest), "File_Manager/output.txt");
         }
@@ -294,6 +348,23 @@ void* operationOneFile(void* arg) {
     }
 
     return NULL;
+}
+
+// Read original filename stored in compressed file's metadata (common FileMetadata at file start)
+static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size) {
+    if (!compressed_path || !out_name) return -1;
+    int fd = open(compressed_path, O_RDONLY);
+    if (fd < 0) return -1;
+    FileMetadata meta;
+    ssize_t r = read(fd, &meta, sizeof(meta));
+    close(fd);
+    if (r != sizeof(meta)) return -1;
+    if (meta.magic != METADATA_MAGIC) return -1;
+    // copy basename only
+    const char* orig = get_basename(meta.originalName);
+    strncpy(out_name, orig, out_size);
+    out_name[out_size-1] = '\0';
+    return 0;
 }
 
 
@@ -352,12 +423,9 @@ void initOperation(ThreadArgs myargs) {
         DIR *dir = opendir(path);
         if (!dir) { perror("Error opening directory"); return; }
 
-        struct dirent *entry;
-        pthread_t threads[8];
-        ThreadArgs args[8];  // store args per thread
-        int batch_count = 0;
+    struct dirent *entry;
 
-        while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != NULL) {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                 continue;
 
@@ -368,29 +436,54 @@ void initOperation(ThreadArgs myargs) {
             if (stat(full_path, &entry_st) != 0 || !S_ISREG(entry_st.st_mode))
                 continue;
 
-            // Copy args for this file
-            args[batch_count] = myargs; 
-            args[batch_count].inPath = strdup(full_path); // each thread needs its own string
-            args[batch_count].outPath = strdup(outFolder); // optionally modify per file if needed
+            // Prepare args for this file and run synchronously to avoid races on shared temp files
+            ThreadArgs ta = myargs;
+            ta.inPath = strdup(full_path);
 
-            pthread_create(&threads[batch_count], NULL, operationOneFile, &args[batch_count]);
-            batch_count++;
+            // Build a unique output filename inside the outFolder based on the input basename
+            const char* compAlg = myargs.compAlg;
+            const char* ext = "";
+            if (strcmp(compAlg, "huffman") == 0) ext = "bin";
+            else if (strcmp(compAlg, "rle") == 0) ext = "rle";
+            else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
 
-            // If 8 threads created, wait for them
-            if (batch_count == 8) {
-                for (int i = 0; i < 8; i++) pthread_join(threads[i], NULL);
-                // free strings
-                for (int i = 0; i < 8; i++) { free((char*)args[i].inPath); free((char*)args[i].outPath); }
-                batch_count = 0;
+            const char* base = get_basename(entry->d_name);
+            // strip extension from base
+            char name_noext[512];
+            strncpy(name_noext, base, sizeof(name_noext)); name_noext[sizeof(name_noext)-1] = '\0';
+            char* dot = strrchr(name_noext, '.');
+            if (dot) *dot = '\0';
+
+            char out_full[1024];
+            if (ext[0] != '\0')
+                snprintf(out_full, sizeof(out_full), "%s/%s.%s", outFolder, name_noext, ext);
+            else
+                snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, name_noext);
+
+            ta.outPath = strdup(out_full); // per-file destination
+
+            // If we're processing a directory for decompression, try to detect the algorithm per-file
+            if (ta.op_d) {
+                const char* fileext = get_extension(entry->d_name);
+                if (strcmp(fileext, "rle") == 0) {
+                    ta.compAlg = "rle";
+                } else if (strcmp(fileext, "lzw") == 0) {
+                    ta.compAlg = "lzw";
+                } else if (strcmp(fileext, "bin") == 0 || strcmp(fileext, "huff") == 0) {
+                    ta.compAlg = "huffman";
+                } else {
+                    // unknown extension: fall back to supplied algorithm
+                    ta.compAlg = myargs.compAlg;
+                }
             }
-        }
 
-        // Join remaining threads in the last batch
-        for (int i = 0; i < batch_count; i++) {
-            pthread_join(threads[i], NULL);
-            free((char*)args[i].inPath);
-            free((char*)args[i].outPath);
+            // Run synchronously to avoid collisions on temporary output files used by compressors
+            operationOneFile(&ta);
+
+            free((char*)ta.inPath);
+            free((char*)ta.outPath);
         }
+        
 
         closedir(dir);
         printf("Folder processing done.\n");
