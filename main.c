@@ -11,7 +11,7 @@
 #include "lzw.h"
 #include "aes.h"
 #include "common.h"
-
+// Mensaje de ayuda en la consola para el uso del programa
 static void usage(const char* prog) {
     fprintf(stderr,
         "Uso: %s [ops] [opciones]\n\n"
@@ -30,18 +30,18 @@ static void usage(const char* prog) {
         "  -k [clave]            Clave para encriptar/desencriptar\n\n",
         prog);
 }
-
+// Verificar si la ruta es un directorio
 static bool is_dir(const char* path) {
     struct stat st;
     if (stat(path, &st) != 0) return false;
     return S_ISDIR(st.st_mode);
 }
-
+// Verificar si el archivo existe (no para directorios)
 static bool file_exists(const char* path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
-
+// Mover resultados a carpeta File_Manager con el nombre dado
 static int move_file(const char* src, const char* dst) {
     if (rename(src, dst) == 0) return 0;
     perror("rename");
@@ -49,7 +49,7 @@ static int move_file(const char* src, const char* dst) {
 }
 
 int main(int argc, char** argv) {
-    bool op_c = false, op_d = false, op_e = false, op_u = false;
+    bool op_c = false, op_d = false, op_e = false, op_u = false; // Banderas para la accion a realizar (Comprimir, descomprimir...)
     const char* compAlg = "huffman";
     const char* encAlg  = "vigenere";
     const char* inPath = NULL;
@@ -60,14 +60,14 @@ int main(int argc, char** argv) {
         usage(argv[0]);
         return 1;
     }
-
+    // Analisis de lo escrito en consola
     for (int i = 1; i < argc; i++) {
         const char* arg = argv[i];
-        if (arg[0] == '-' && arg[1] == '-' ) {
-            if (strcmp(arg, "--comp-alg") == 0) {
+        if (arg[0] == '-' && arg[1] == '-' ) { 
+            if (strcmp(arg, "--comp-alg") == 0) { // Verificar el algoritmo de compresion especificado
                 if (i + 1 >= argc) { fprintf(stderr, "Falta valor para --comp-alg\n"); return 1; }
                 compAlg = argv[++i];
-            } else if (strcmp(arg, "--enc-alg") == 0) {
+            } else if (strcmp(arg, "--enc-alg") == 0) { // Verificar el algoritmo de encriptacion especificado
                 if (i + 1 >= argc) { fprintf(stderr, "Falta valor para --enc-alg\n"); return 1; }
                 encAlg = argv[++i];
             } else if (strcmp(arg, "--help") == 0) {
@@ -80,19 +80,19 @@ int main(int argc, char** argv) {
             }
         } else if (arg[0] == '-' && arg[1] != '\0') {
             // Soporta -c -d -e -u y combinaciones tipo -ce
-            if (strcmp(arg, "-i") == 0) {
+            if (strcmp(arg, "-i") == 0) { // Verificar ruta de entrada
                 if (i + 1 >= argc) { fprintf(stderr, "Falta ruta para -i\n"); return 1; }
                 inPath = argv[++i];
-            } else if (strcmp(arg, "-o") == 0) {
+            } else if (strcmp(arg, "-o") == 0) { // Verificar ruta de salida
                 if (i + 1 >= argc) { fprintf(stderr, "Falta ruta para -o\n"); return 1; }
                 outPath = argv[++i];
-            } else if (strcmp(arg, "-k") == 0) {
+            } else if (strcmp(arg, "-k") == 0) { // Verificar clave para encriptacion/desencriptacion
                 if (i + 1 >= argc) { fprintf(stderr, "Falta clave para -k\n"); return 1; }
                 key = argv[++i];
             } else {
                 // Parsear banderas cortas combinadas
                 for (int j = 1; arg[j] != '\0'; j++) {
-                    switch (arg[j]) {
+                    switch (arg[j]) { // Activar banderas segun lo especificado
                         case 'c': op_c = true; break;
                         case 'd': op_d = true; break;
                         case 'e': op_e = true; break;

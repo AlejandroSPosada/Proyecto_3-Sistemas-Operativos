@@ -12,13 +12,13 @@
 #include "../posix_utils.h"
 
 #define LZW_MAX_DICT 4096
-
+// Estructura de cualquier entrada del diccionario LZW
 typedef struct {
-    int code;
-    unsigned char* data;
-    size_t len;
+    int code; // Numero de codigo asignado
+    unsigned char* data; // Secuencia de bytes asociada
+    size_t len; // Longitud de la secuencia
 } LZWEntry;
-
+// Se inicia el diccionario con los 256 valores de un byte (0x00 a 0xFF)
 static int crearDiccionario(LZWEntry *dic) {
     for (int i = 0; i < 256; i++) {
         dic[i].code = i;
@@ -32,13 +32,13 @@ static int crearDiccionario(LZWEntry *dic) {
     }
     return 256;
 }
-
+// Liberar memoria del diccionario
 static void freeDictionary(LZWEntry *dic, int size) {
     for (int i = 0; i < size; i++) {
         if (dic[i].data) free(dic[i].data);
     }
 }
-
+// Buscar una secuencia comparando en el diccionario, retorna el codigo si se encuentra
 static int findInDict(LZWEntry *dic, int dictSize, const unsigned char* data, size_t len) {
     for (int i = 0; i < dictSize; i++) {
         if (dic[i].len == len && memcmp(dic[i].data, data, len) == 0) return dic[i].code;
@@ -58,14 +58,14 @@ void writeLZW(char inputFile[]) {
         posix_close(fd_input);
         return;
     }
-
+    // Reservar espacio en memoria para almacenar bytes del archivo
     unsigned char *buf = (unsigned char*)malloc(fileSize > 0 ? fileSize : 1);
     if (!buf) {
         fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
         posix_close(fd_input);
         return;
     }
-    
+    // Se leen todos los bytes del archivo en el buffer
     ssize_t bytes_read = posix_read_full(fd_input, buf, fileSize);
     posix_close(fd_input);
     
@@ -74,32 +74,32 @@ void writeLZW(char inputFile[]) {
         free(buf);
         return;
     }
-
+    // Se crea el diccionario inicial con sus 256 entradas preestablecidas.
     LZWEntry dict[LZW_MAX_DICT];
     int dictSize = crearDiccionario(dict);
     if (dictSize < 0) { free(buf); fprintf(stderr, "Failed to init dictionary\n"); return; }
-
+    // Se reserva espacio para los codigos LZW generados
     uint16_t *codes = (uint16_t*)malloc(sizeof(uint16_t) * (bytes_read + 16));
     if (!codes) { perror("malloc codes"); free(buf); freeDictionary(dict, dictSize); return; }
     size_t outCount = 0;
-
+    // Variables para la secuencia actual, w siendo la secuencia actual y wlen su longitud
     unsigned char *w = NULL;
     size_t wlen = 0;
-
+    // Se recorre el archivo de entrada byte por byte
     for (size_t i = 0; i < (size_t)bytes_read; i++) {
         unsigned char k = buf[i];
-
+        // Se crea una cadena, que concatena la actual con la siguiente
         unsigned char *wk = (unsigned char*)malloc(wlen + 1);
         if (!wk) { perror("malloc wk"); free(buf); free(codes); freeDictionary(dict, dictSize); return; }
         if (wlen > 0) memcpy(wk, w, wlen);
         wk[wlen] = k;
-
+        // Se busca la nueva secuencia wk en el diccionario actual
         int idx = findInDict(dict, dictSize, wk, wlen + 1);
-        if (idx != -1) {
+        if (idx != -1) { // Si se encuentra, w = wk
             if (w) free(w);
             w = wk;
             wlen = wlen + 1;
-        } else {
+        } else { // Si no se encuentra, el codigo de w es emitido y wk se añade al diccionario
             if (wlen == 0) {
                 codes[outCount++] = (uint16_t)k;
             } else {
@@ -124,7 +124,7 @@ void writeLZW(char inputFile[]) {
             w[0] = k; wlen = 1;
         }
     }
-
+    // Si se llega al final, se emite el codigo de w pendiente
     if (wlen > 0) {
         int codeW = findInDict(dict, dictSize, w, wlen);
         if (codeW != -1) codes[outCount++] = (uint16_t)codeW;
@@ -137,7 +137,7 @@ void writeLZW(char inputFile[]) {
         if (w) free(w);
         return;
     }
-
+    // Se escribe el metadata header del archivo comprimido, que incluye tamaño original y nombre
     FileMetadata meta = {0};
     meta.magic = METADATA_MAGIC;
     meta.originalSize = (uint64_t)bytes_read;
@@ -152,7 +152,7 @@ void writeLZW(char inputFile[]) {
         if (w) free(w);
         return;
     }
-
+    // Se escribe el numero de codigos generados
     uint32_t count = (uint32_t)outCount;
     if (posix_write_full(fd_output, &count, sizeof(uint32_t)) != sizeof(uint32_t)) {
         fprintf(stderr, "Failed to write count\n");
@@ -161,7 +161,7 @@ void writeLZW(char inputFile[]) {
         if (w) free(w);
         return;
     }
-    
+    // Se escriben los codigos generados
     size_t codes_bytes = sizeof(uint16_t) * outCount;
     if (posix_write_full(fd_output, codes, codes_bytes) != (ssize_t)codes_bytes) {
         fprintf(stderr, "Failed to write codes\n");
@@ -172,7 +172,7 @@ void writeLZW(char inputFile[]) {
     }
 
     posix_close(fd_output);
-
+    // Se liberan los recursos (como la memoria reservada) y se cierra el archivo
     free(buf);
     free(codes);
     if (w) free(w);
@@ -193,7 +193,7 @@ int readLZW(char inputFile[]) {
         return 1;
     }
     uint64_t origSize = meta.originalSize;
-
+    // Se leen los codigos y los datos comprimidos
     uint32_t count;
     if (posix_read_full(fd_input, &count, sizeof(uint32_t)) != sizeof(uint32_t)) {
         fprintf(stderr, "Failed to read count\n");
@@ -206,7 +206,7 @@ int readLZW(char inputFile[]) {
         posix_close(fd_input);
         return 1;
     }
-
+    // Se cargan los codigos comprimidos en memoria
     uint16_t *codes = (uint16_t*)malloc(sizeof(uint16_t) * count);
     if (!codes) {
         fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
@@ -222,16 +222,16 @@ int readLZW(char inputFile[]) {
         return 1;
     }
     posix_close(fd_input);
-
+    // Se recrea el diccionario inicial
     LZWEntry dict[LZW_MAX_DICT];
     int dictSize = crearDiccionario(dict);
     if (dictSize < 0) { free(codes); fprintf(stderr, "Failed to init dictionary\n"); return 1; }
-
+    // Buffer de salida para los datos descomprimidos
     unsigned char *outBuf = (unsigned char*)malloc(origSize > 0 ? origSize : 1);
     if (!outBuf) { perror("malloc outBuf"); free(codes); freeDictionary(dict, dictSize); return 1; }
     uint64_t outPos = 0;
 
-    // Process first code
+    // Se procesa el primer codigo
     if (codes[0] >= (uint16_t)dictSize) { fprintf(stderr, "Invalid first code\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
     unsigned char *entry = dict[codes[0]].data;
     size_t entryLen = dict[codes[0]].len;
@@ -239,36 +239,36 @@ int readLZW(char inputFile[]) {
     memcpy(outBuf + outPos, entry, entryLen);
     outPos += entryLen;
 
-    // previous entry copy
+    // Se guarda la secuencia previamente decodificada
     unsigned char *prev = (unsigned char*)malloc(entryLen);
     if (!prev) { perror("malloc prev"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
     memcpy(prev, entry, entryLen);
     size_t prevLen = entryLen;
-
+    // Bucle que recorre todos los codigos
     for (uint32_t i = 1; i < count; i++) {
         uint16_t code = codes[i];
         unsigned char *current = NULL;
         size_t curLen = 0;
-
+        // Se copia la secuencia si el codigo ya existe en el diccionario
         if (code < (uint16_t)dictSize) {
             current = (unsigned char*)malloc(dict[code].len);
             if (!current) { perror("malloc current"); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
             memcpy(current, dict[code].data, dict[code].len);
             curLen = dict[code].len;
         } else {
-            // special case: code equals dictSize -> prev + first byte of prev
+            // Si el codigo aun no existe, se crea con la regla de LZW: la cadena anterior + primer byte de la cadena anterior
             curLen = prevLen + 1;
             current = (unsigned char*)malloc(curLen);
             if (!current) { perror("malloc special"); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
             memcpy(current, prev, prevLen);
             current[curLen-1] = prev[0];
         }
-
+        // Se agrega la secuencia decodificada al nuevo archivo de salida
         if (outPos + curLen > origSize) { fprintf(stderr, "Output overflow while writing\n"); free(current); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
         memcpy(outBuf + outPos, current, curLen);
         outPos += curLen;
-
-        // add prev + first byte of current to dictionary
+        
+        // Se añade el byte previo + el primer byte de la secuencia actual al diccionario
         if (dictSize < LZW_MAX_DICT) {
             size_t newLen = prevLen + 1;
             dict[dictSize].data = (unsigned char*)malloc(newLen);
@@ -279,7 +279,7 @@ int readLZW(char inputFile[]) {
             dict[dictSize].code = dictSize;
             dictSize++;
         }
-
+        // prev se convierte en current para el siguiente ciclo
         free(prev);
         prev = current;
         prevLen = curLen;

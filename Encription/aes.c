@@ -10,11 +10,11 @@
 #include "../posix_utils.h"
 
 // AES-256 constants
-#define Nb 4  // Number of columns (32-bit words) in the state (always 4 for AES)
-#define Nk 8  // Number of 32-bit words in the key (8 for AES-256)
-#define Nr 14 // Number of rounds (14 for AES-256)
+#define Nb 4  // Numero de columnas (palabras de 32 bits) en el estado, 4 para AES
+#define Nk 8  // Tamaño de la clave (en palabras de 32 bits), 8 para AES-256
+#define Nr 14 // Numero de rondas del algoritmo, 14 para AES-256
 
-// S-box: Substitution box for SubBytes transformation
+// S-box: Tablas de sustitucion que hacen el paso a SubBytes
 static const uint8_t sbox[256] = {
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -34,7 +34,7 @@ static const uint8_t sbox[256] = {
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 };
 
-// Inverse S-box for InvSubBytes
+// El inverso de la S-box: Tablas de sustitucion inversa
 static const uint8_t inv_sbox[256] = {
     0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
     0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
@@ -54,42 +54,42 @@ static const uint8_t inv_sbox[256] = {
     0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
 };
 
-// Round constant for key expansion
+// Val0ores constantes para la expansion de la clave en cada ronda
 static const uint8_t Rcon[11] = {
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
 };
-
-// Galois Field multiplication by 2
+// Multiplicaciones en el campo de Galois para MixColumns
+// Multiplicacion por 2 en el campo de Galois
 static uint8_t gmul2(uint8_t a) {
     return (a << 1) ^ (((a >> 7) & 1) * 0x1b);
 }
 
-// Galois Field multiplication by 3
+// Multiplicacion por 3 en el campo de Galois
 static uint8_t gmul3(uint8_t a) {
     return gmul2(a) ^ a;
 }
 
-// Galois Field multiplication by 9
+// Multiplicacion por 9 en el campo de Galois
 static uint8_t gmul9(uint8_t a) {
     return gmul2(gmul2(gmul2(a))) ^ a;
 }
 
-// Galois Field multiplication by 11
+// Multiplicacion por 11 en el campo de Galois
 static uint8_t gmul11(uint8_t a) {
     return gmul2(gmul2(gmul2(a)) ^ a) ^ a;
 }
 
-// Galois Field multiplication by 13
+// Multiplicacion por 13 en el campo de Galois
 static uint8_t gmul13(uint8_t a) {
     return gmul2(gmul2(gmul2(a) ^ a)) ^ a;
 }
 
-// Galois Field multiplication by 14
+// Multiplicacion por 14 en el campo de Galois
 static uint8_t gmul14(uint8_t a) {
     return gmul2(gmul2(gmul2(a) ^ a) ^ a);
 }
 
-// SubBytes transformation
+// Transformacion de SubBytes
 static void SubBytes(uint8_t state[4][4]) {
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
@@ -98,7 +98,7 @@ static void SubBytes(uint8_t state[4][4]) {
     }
 }
 
-// InvSubBytes transformation
+// Transformacion de InvSubBytes
 static void InvSubBytes(uint8_t state[4][4]) {
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
@@ -107,18 +107,18 @@ static void InvSubBytes(uint8_t state[4][4]) {
     }
 }
 
-// ShiftRows transformation
+// Transformacion de ShiftRows
 static void ShiftRows(uint8_t state[4][4]) {
     uint8_t temp;
     
-    // Row 1: shift left by 1
+    // Fila 1: Se desplaza a la izquierda por 1
     temp = state[1][0];
     state[1][0] = state[1][1];
     state[1][1] = state[1][2];
     state[1][2] = state[1][3];
     state[1][3] = temp;
     
-    // Row 2: shift left by 2
+    // Fila 2: Se desplaza a la izquierda por 2
     temp = state[2][0];
     state[2][0] = state[2][2];
     state[2][2] = temp;
@@ -126,7 +126,7 @@ static void ShiftRows(uint8_t state[4][4]) {
     state[2][1] = state[2][3];
     state[2][3] = temp;
     
-    // Row 3: shift left by 3 (or right by 1)
+    // Fila 1: Se desplaza a la izquierda por 3 (o a la derecha por 1)
     temp = state[3][3];
     state[3][3] = state[3][2];
     state[3][2] = state[3][1];
@@ -134,18 +134,18 @@ static void ShiftRows(uint8_t state[4][4]) {
     state[3][0] = temp;
 }
 
-// InvShiftRows transformation
+// Transformacion de InvShiftRows
 static void InvShiftRows(uint8_t state[4][4]) {
     uint8_t temp;
     
-    // Row 1: shift right by 1
+    // Fila 1: Se desplaza a la derecha por 1
     temp = state[1][3];
     state[1][3] = state[1][2];
     state[1][2] = state[1][1];
     state[1][1] = state[1][0];
     state[1][0] = temp;
     
-    // Row 2: shift right by 2
+    // Fila 2: Se desplaza a la derecha por 2
     temp = state[2][0];
     state[2][0] = state[2][2];
     state[2][2] = temp;
@@ -153,7 +153,7 @@ static void InvShiftRows(uint8_t state[4][4]) {
     state[2][1] = state[2][3];
     state[2][3] = temp;
     
-    // Row 3: shift right by 3 (or left by 1)
+    // Fila 3: Se desplaza a la derecha por 3 (o a la izquierda por 1)
     temp = state[3][0];
     state[3][0] = state[3][1];
     state[3][1] = state[3][2];
@@ -161,7 +161,7 @@ static void InvShiftRows(uint8_t state[4][4]) {
     state[3][3] = temp;
 }
 
-// MixColumns transformation
+// Transformacion de MixColumns
 static void MixColumns(uint8_t state[4][4]) {
     uint8_t temp[4];
     
@@ -178,7 +178,7 @@ static void MixColumns(uint8_t state[4][4]) {
     }
 }
 
-// InvMixColumns transformation
+// Transformacion de InvMixColumns
 static void InvMixColumns(uint8_t state[4][4]) {
     uint8_t temp[4];
     
@@ -195,7 +195,7 @@ static void InvMixColumns(uint8_t state[4][4]) {
     }
 }
 
-// AddRoundKey transformation
+// Transformacion de AddRoundKey
 static void AddRoundKey(uint8_t state[4][4], const uint8_t* roundKey) {
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
@@ -204,12 +204,12 @@ static void AddRoundKey(uint8_t state[4][4], const uint8_t* roundKey) {
     }
 }
 
-// Key expansion for AES-256
+// Expansion de la llave para AES-256
 static void KeyExpansion(const uint8_t* key, uint8_t* expandedKey) {
     uint8_t temp[4];
     int i = 0;
     
-    // First Nk words are the key itself
+    // Las primeras palabras Nk son la clave original
     while (i < Nk) {
         expandedKey[i * 4] = key[i * 4];
         expandedKey[i * 4 + 1] = key[i * 4 + 1];
@@ -218,7 +218,7 @@ static void KeyExpansion(const uint8_t* key, uint8_t* expandedKey) {
         i++;
     }
     
-    // Generate remaining words
+    // Generar las palabras restantes
     i = Nk;
     while (i < Nb * (Nr + 1)) {
         temp[0] = expandedKey[(i - 1) * 4];
@@ -242,7 +242,7 @@ static void KeyExpansion(const uint8_t* key, uint8_t* expandedKey) {
             
             temp[0] ^= Rcon[i / Nk];
         } else if (i % Nk == 4) {
-            // SubWord for AES-256
+            // SubWord para AES-256
             temp[0] = sbox[temp[0]];
             temp[1] = sbox[temp[1]];
             temp[2] = sbox[temp[2]];
@@ -257,21 +257,21 @@ static void KeyExpansion(const uint8_t* key, uint8_t* expandedKey) {
     }
 }
 
-// AES encryption of a single block
+// Encriptacion AES de un solo bloque
 static void AES_Encrypt_Block(const uint8_t* input, uint8_t* output, const uint8_t* expandedKey) {
     uint8_t state[4][4];
     
-    // Copy input to state
+    // Copiar input a state
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             state[j][i] = input[i * 4 + j];
         }
     }
     
-    // Initial round
+    // Ronda inicial
     AddRoundKey(state, expandedKey);
     
-    // Main rounds
+    // Rondas principales
     for (int round = 1; round < Nr; round++) {
         SubBytes(state);
         ShiftRows(state);
@@ -279,12 +279,12 @@ static void AES_Encrypt_Block(const uint8_t* input, uint8_t* output, const uint8
         AddRoundKey(state, expandedKey + round * 16);
     }
     
-    // Final round (no MixColumns)
+    // Ronda final (sin MixColumns)
     SubBytes(state);
     ShiftRows(state);
     AddRoundKey(state, expandedKey + Nr * 16);
     
-    // Copy state to output
+    // Copiar state a output
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             output[i * 4 + j] = state[j][i];
@@ -292,21 +292,21 @@ static void AES_Encrypt_Block(const uint8_t* input, uint8_t* output, const uint8
     }
 }
 
-// AES decryption of a single block
+// Decriptacion AES de un solo bloque
 static void AES_Decrypt_Block(const uint8_t* input, uint8_t* output, const uint8_t* expandedKey) {
     uint8_t state[4][4];
     
-    // Copy input to state
+    // Copiar input a estado
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             state[j][i] = input[i * 4 + j];
         }
     }
     
-    // Initial round
+    // Ronda inicial
     AddRoundKey(state, expandedKey + Nr * 16);
     
-    // Main rounds
+    // Rondas principales
     for (int round = Nr - 1; round > 0; round--) {
         InvShiftRows(state);
         InvSubBytes(state);
@@ -314,12 +314,12 @@ static void AES_Decrypt_Block(const uint8_t* input, uint8_t* output, const uint8
         InvMixColumns(state);
     }
     
-    // Final round (no InvMixColumns)
+    // Ronda final (sin InvMixColumns)
     InvShiftRows(state);
     InvSubBytes(state);
     AddRoundKey(state, expandedKey);
     
-    // Copy state to output
+    // Copiar state a output
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             output[i * 4 + j] = state[j][i];
@@ -327,7 +327,7 @@ static void AES_Decrypt_Block(const uint8_t* input, uint8_t* output, const uint8
     }
 }
 
-// Simple password-to-key derivation
+// Derivacion simple de clave a partir de la contraseña
 static void derive_key_from_password(const char* password, uint8_t* key) {
     memset(key, 0, AES_KEY_SIZE);
     size_t len = strlen(password);
@@ -339,12 +339,12 @@ static void derive_key_from_password(const char* password, uint8_t* key) {
         return;
     }
     
-    // Repeat password and XOR with index-based values
+    // Repetir contraseña y XOR con valores basados ​​en indices
     for (size_t i = 0; i < AES_KEY_SIZE; i++) {
         key[i] = password[i % len] ^ (uint8_t)(i * 7 + 13);
     }
     
-    // Additional mixing rounds
+    // Rondas adicionales de mezcla
     for (int round = 0; round < 100; round++) {
         for (int i = 0; i < AES_KEY_SIZE; i++) {
             key[i] = sbox[key[i]] ^ key[(i + 7) % AES_KEY_SIZE];
@@ -352,7 +352,7 @@ static void derive_key_from_password(const char* password, uint8_t* key) {
     }
 }
 
-// PKCS7 padding
+// Relleno PKCS7 para que el tamaño del archivo sea multiplo de 16 bytes
 static size_t add_padding(uint8_t* data, size_t dataLen, size_t bufferSize) {
     size_t paddingLen = AES_BLOCK_SIZE - (dataLen % AES_BLOCK_SIZE);
     if (dataLen + paddingLen > bufferSize) {
@@ -366,7 +366,7 @@ static size_t add_padding(uint8_t* data, size_t dataLen, size_t bufferSize) {
     return dataLen + paddingLen;
 }
 
-// Remove PKCS7 padding
+// Eliminar relleno PKCS7
 static size_t remove_padding(const uint8_t* data, size_t dataLen) {
     if (dataLen == 0 || dataLen % AES_BLOCK_SIZE != 0) {
         return 0;
@@ -387,7 +387,7 @@ static size_t remove_padding(const uint8_t* data, size_t dataLen) {
     return dataLen - paddingLen;
 }
 
-// Encrypt file (POSIX VERSION)
+// Encriptar archivo (VERSION POSIX)
 int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* password) {
     // Abrir archivo de entrada con POSIX
     int fd_input = posix_open_read(inputPath);
@@ -480,7 +480,7 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     return 0;
 }
 
-// Decrypt file
+// Decriptar archivo
 int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* password) {
     int fd_input = posix_open_read(inputPath);
     if (fd_input < 0) {
