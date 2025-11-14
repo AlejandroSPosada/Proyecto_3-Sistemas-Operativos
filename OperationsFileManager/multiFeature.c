@@ -2,6 +2,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+// Mutex global para proteger operaciones de compresión/descompresión
+// que usan archivos temporales compartidos
+static pthread_mutex_t compression_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // forward declaration
 static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size);
 
@@ -157,45 +161,76 @@ void* operationOneFile(void* arg) {
     }
     
     if (op_c) {
-        // Compression: entrada -> File_Manager/output.[ext]
-        const char* produced;
+        // Compression: entrada -> archivo temporal único por hilo
+        const char* temp_produced;
+        const char* final_dest;
         
-        if (strcmp(compAlg, "huffman") == 0) {
-            writeHuffman((char*)inPath);
-            produced = "File_Manager/output.bin";
-        } else if (strcmp(compAlg, "rle") == 0) {
-            writeRLE((char*)inPath);
-            produced = "File_Manager/output.rle";
-        } else if (strcmp(compAlg, "lzw") == 0) {
-            writeLZW((char*)inPath);
-            produced = "File_Manager/output.lzw";
-        } else {
-            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
-            return NULL;
-        }
-        
-        // Siempre dejar en File_Manager: usar nombre dado por -o (si existe) pero dentro de File_Manager
-        if (!file_exists(produced)) {
-            fprintf(stderr, "No se encontró salida de compresión: %s\n", produced);
-            return NULL;
-        }
+        // Determinar destino final ANTES de comprimir
+        char dest[512];
         if (outPath) {
-            char dest[512];
             if (strchr(outPath, '/') != NULL) {
                 snprintf(dest, sizeof(dest), "%s", outPath);
             } else {
                 const char* base = get_basename(outPath);
                 snprintf(dest, sizeof(dest), "File_Manager/%s", base);
             }
-            if (strcmp(dest, produced) != 0) {
-                if (move_file(produced, dest) != 0) return NULL;
-                printf("Archivo comprimido guardado en: %s\n", dest);
-            } else {
-                printf("Archivo comprimido guardado en: %s\n", produced);
-            }
+            final_dest = dest;
         } else {
-            printf("Archivo comprimido guardado en: %s\n", produced);
+            // Sin outPath especificado, generar nombre basado en input
+            const char* base = get_basename(inPath);
+            char name_noext[512];
+            strncpy(name_noext, base, sizeof(name_noext)); 
+            name_noext[sizeof(name_noext)-1] = '\0';
+            char* dot = strrchr(name_noext, '.');
+            if (dot) *dot = '\0';
+            
+            const char* ext = "";
+            if (strcmp(compAlg, "huffman") == 0) ext = "bin";
+            else if (strcmp(compAlg, "rle") == 0) ext = "rle";
+            else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
+            
+            snprintf(dest, sizeof(dest), "File_Manager/%s.%s", name_noext, ext);
+            final_dest = dest;
         }
+        
+        // BLOQUEAR: Solo un hilo puede comprimir a la vez (evita race condition en File_Manager/output.XXX)
+        pthread_mutex_lock(&compression_mutex);
+        
+        // Comprimir (esto genera File_Manager/output.XXX)
+        if (strcmp(compAlg, "huffman") == 0) {
+            writeHuffman((char*)inPath);
+            temp_produced = "File_Manager/output.bin";
+        } else if (strcmp(compAlg, "rle") == 0) {
+            writeRLE((char*)inPath);
+            temp_produced = "File_Manager/output.rle";
+        } else if (strcmp(compAlg, "lzw") == 0) {
+            writeLZW((char*)inPath);
+            temp_produced = "File_Manager/output.lzw";
+        } else {
+            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
+            pthread_mutex_unlock(&compression_mutex);
+            return NULL;
+        }
+        
+        // CRÍTICO: Mover INMEDIATAMENTE a destino final para evitar que otro hilo lo sobrescriba
+        if (!file_exists(temp_produced)) {
+            fprintf(stderr, "[Thread] No se encontró salida de compresión: %s\n", temp_produced);
+            pthread_mutex_unlock(&compression_mutex);
+            return NULL;
+        }
+        
+        // Mover el archivo temporal al destino final
+        if (rename(temp_produced, final_dest) != 0) {
+            fprintf(stderr, "[Thread] Error moviendo %s -> %s: %s\n", 
+                    temp_produced, final_dest, strerror(errno));
+            pthread_mutex_unlock(&compression_mutex);
+            return NULL;
+        }
+        
+        // DESBLOQUEAR: Permitir que otro hilo comprima
+        pthread_mutex_unlock(&compression_mutex);
+        
+        printf("Archivo comprimido guardado en: %s\n", final_dest);
         return NULL;
     }
 
@@ -206,34 +241,12 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        int result;
-        if (strcmp(compAlg, "huffman") == 0) {
-            result = readHuffman((char*)inPath);
-        } else if (strcmp(compAlg, "rle") == 0) {
-            result = readRLE((char*)inPath);
-        } else if (strcmp(compAlg, "lzw") == 0) {
-            result = readLZW((char*)inPath);
-        } else {
-            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
-            return NULL;
-        }
-        
-        if (result != 0) {
-            fprintf(stderr, "Fallo al descomprimir %s\n", inPath);
-            return NULL;
-        }
-        const char* produced = "File_Manager/output.txt";
-        if (!file_exists(produced)) {
-            fprintf(stderr, "No se encontró salida de descompresión: %s\n", produced);
-            return NULL;
-        }
-
-        // Try to read original filename from compressed input and restore it
+        // Determinar destino final primero
         char original_name[512];
         int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
-
+        char final_dest[1536];
+        
         if (have_original) {
-            // determine output folder: if outPath contains '/', use its directory; otherwise default to File_Manager
             char folder[1024];
             if (outPath && strchr(outPath, '/') != NULL) {
                 const char* last = strrchr(outPath, '/');
@@ -244,30 +257,60 @@ void* operationOneFile(void* arg) {
             } else {
                 strncpy(folder, "File_Manager", sizeof(folder)); folder[sizeof(folder)-1] = '\0';
             }
-
-            char dest[1536];
-            snprintf(dest, sizeof(dest), "%s/%s", folder, get_basename(original_name));
-            if (move_file(produced, dest) != 0) return NULL;
-            printf("Archivo descomprimido guardado en: %s\n", dest);
+            snprintf(final_dest, sizeof(final_dest), "%s/%s", folder, get_basename(original_name));
         } else {
             if (outPath) {
-                char dest[512];
                 if (strchr(outPath, '/') != NULL) {
-                    snprintf(dest, sizeof(dest), "%s", outPath);
+                    snprintf(final_dest, sizeof(final_dest), "%s", outPath);
                 } else {
                     const char* base = get_basename(outPath);
-                    snprintf(dest, sizeof(dest), "File_Manager/%s", base);
-                }
-                if (strcmp(dest, produced) != 0) {
-                    if (move_file(produced, dest) != 0) return NULL;
-                    printf("Archivo descomprimido guardado en: %s\n", dest);
-                } else {
-                    printf("Archivo descomprimido guardado en: %s\n", produced);
+                    snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", base);
                 }
             } else {
-                printf("Archivo descomprimido guardado en: %s\n", produced);
+                snprintf(final_dest, sizeof(final_dest), "File_Manager/output.txt");
             }
         }
+        
+        // BLOQUEAR: Un solo hilo puede descomprimir a la vez
+        pthread_mutex_lock(&compression_mutex);
+        
+        int result;
+        if (strcmp(compAlg, "huffman") == 0) {
+            result = readHuffman((char*)inPath);
+        } else if (strcmp(compAlg, "rle") == 0) {
+            result = readRLE((char*)inPath);
+        } else if (strcmp(compAlg, "lzw") == 0) {
+            result = readLZW((char*)inPath);
+        } else {
+            fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
+            pthread_mutex_unlock(&compression_mutex);
+            return NULL;
+        }
+        
+        if (result != 0) {
+            fprintf(stderr, "Fallo al descomprimir %s\n", inPath);
+            pthread_mutex_unlock(&compression_mutex);
+            return NULL;
+        }
+        const char* produced = "File_Manager/output.txt";
+        if (!file_exists(produced)) {
+            fprintf(stderr, "No se encontró salida de descompresión: %s\n", produced);
+            pthread_mutex_unlock(&compression_mutex);
+            return NULL;
+        }
+
+        // Mover inmediatamente al destino final
+        if (strcmp(final_dest, produced) != 0) {
+            if (move_file(produced, final_dest) != 0) {
+                pthread_mutex_unlock(&compression_mutex);
+                return NULL;
+            }
+        }
+        
+        // DESBLOQUEAR: Permitir que otro hilo descomprima
+        pthread_mutex_unlock(&compression_mutex);
+        
+        printf("Archivo descomprimido guardado en: %s\n", final_dest);
         return NULL;
     }
 
@@ -426,13 +469,14 @@ static int read_original_name_from_compressed(const char* compressed_path, char*
     return 0;
 }
 
-
-static bool file_exists(const char* path) {
+// Verificar si el archivo existe
+bool file_exists(const char* path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-static int move_file(const char* src, const char* dst_folder) {
+// Mover archivo de src a dst (dst puede ser directorio o ruta completa)
+int move_file(const char* src, const char* dst_folder) {
     struct stat st;
     if (stat(dst_folder, &st) == 0 && S_ISDIR(st.st_mode)) {
         // dst_folder is a directory, append filename
@@ -450,10 +494,16 @@ static int move_file(const char* src, const char* dst_folder) {
     }
 }
 
+// Estructura para mantener información de cada hilo
+typedef struct {
+    pthread_t thread;
+    ThreadArgs* args;
+} ThreadInfo;
+
 /*
 Here we start with the interaction with File_Manager. 
 First let's realize if we are dealing with a file or a folder. 
-If only a file, then only a thread. If a folder, then let's use several threads.
+If only a file, then only a thread. If a folder, then let's use several threads IN PARALLEL.
 */
 void initOperation(ThreadArgs myargs) {
     const char *path = myargs.inPath;
@@ -471,20 +521,30 @@ void initOperation(ThreadArgs myargs) {
         pthread_join(thread1, NULL);
         return;
     } else if (S_ISDIR(st.st_mode)) {
-        printf("It is a folder.\n");
+        printf("It is a folder - processing files in PARALLEL...\n");
 
-        // Create output folder
+        // Create output folder (use -o if provided, otherwise default to <input>_processed)
         char outFolder[1024];
-        snprintf(outFolder, sizeof(outFolder), "%s_processed", path);
+        if (myargs.outPath && myargs.outPath[0] != '\0') {
+            snprintf(outFolder, sizeof(outFolder), "%s", myargs.outPath);
+        } else {
+            snprintf(outFolder, sizeof(outFolder), "%s_processed", path);
+        }
         mkdir(outFolder, 0755);
 
         // Open directory
         DIR *dir = opendir(path);
         if (!dir) { perror("Error opening directory"); return; }
 
-    struct dirent *entry;
+        // Array dinámico para almacenar información de hilos
+        ThreadInfo* threads = NULL;
+        int thread_count = 0;
+        int thread_capacity = 0;
 
-    while ((entry = readdir(dir)) != NULL) {
+        struct dirent *entry;
+
+        // FASE 1: Crear todos los hilos (ejecución paralela)
+        while ((entry = readdir(dir)) != NULL) {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                 continue;
 
@@ -495,14 +555,32 @@ void initOperation(ThreadArgs myargs) {
             if (stat(full_path, &entry_st) != 0 || !S_ISREG(entry_st.st_mode))
                 continue;
 
-            // Prepare args for this file and run synchronously to avoid races on shared temp files
-            ThreadArgs ta = myargs;
-            ta.inPath = strdup(full_path);
+            // Expandir array si es necesario
+            if (thread_count >= thread_capacity) {
+                thread_capacity = (thread_capacity == 0) ? 10 : thread_capacity * 2;
+                threads = realloc(threads, thread_capacity * sizeof(ThreadInfo));
+                if (!threads) {
+                    perror("Error al reservar memoria para hilos");
+                    closedir(dir);
+                    return;
+                }
+            }
+
+            // Preparar argumentos para este archivo (allocar memoria persistente)
+            ThreadArgs* ta = malloc(sizeof(ThreadArgs));
+            if (!ta) {
+                perror("Error al reservar memoria para ThreadArgs");
+                continue;
+            }
+            
+            *ta = myargs;
+            ta->inPath = strdup(full_path);
 
             const char* base = get_basename(entry->d_name);
             // strip extension from base
             char name_noext[512];
-            strncpy(name_noext, base, sizeof(name_noext)); name_noext[sizeof(name_noext)-1] = '\0';
+            strncpy(name_noext, base, sizeof(name_noext)); 
+            name_noext[sizeof(name_noext)-1] = '\0';
             char* dot = strrchr(name_noext, '.');
             if (dot) *dot = '\0';
 
@@ -510,18 +588,18 @@ void initOperation(ThreadArgs myargs) {
             
             // If encrypting a directory, compress then encrypt so decryption can restore originals
             if (myargs.op_e) {
-                ta.op_e = true;
-                ta.op_c = true;
-                if (!ta.compAlg || ta.compAlg[0] == '\0') {
-                    ta.compAlg = "rle";  // default to RLE if not specified
+                ta->op_e = true;
+                ta->op_c = true;
+                if (!ta->compAlg || ta->compAlg[0] == '\0') {
+                    ta->compAlg = "rle";  // default to RLE if not specified
                 }
                 snprintf(out_full, sizeof(out_full), "%s/%s.bin", outFolder, name_noext);
-                ta.outPath = strdup(out_full);
+                ta->outPath = strdup(out_full);
             }
             // If decrypting, set outPath to the output folder so auto-descompression works
             else if (myargs.op_u) {
                 snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, base);
-                ta.outPath = strdup(out_full);
+                ta->outPath = strdup(out_full);
             } else {
                 // Build a unique output filename inside the outFolder based on the input basename
                 const char* compAlg = myargs.compAlg;
@@ -535,34 +613,57 @@ void initOperation(ThreadArgs myargs) {
                 else
                     snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, name_noext);
 
-                ta.outPath = strdup(out_full); // per-file destination
+                ta->outPath = strdup(out_full); // per-file destination
 
                 // If we're processing a directory for decompression, try to detect the algorithm per-file
-                if (ta.op_d) {
+                if (ta->op_d) {
                     const char* fileext = get_extension(entry->d_name);
                     if (strcmp(fileext, "rle") == 0) {
-                        ta.compAlg = "rle";
+                        ta->compAlg = "rle";
                     } else if (strcmp(fileext, "lzw") == 0) {
-                        ta.compAlg = "lzw";
+                        ta->compAlg = "lzw";
                     } else if (strcmp(fileext, "bin") == 0 || strcmp(fileext, "huff") == 0) {
-                        ta.compAlg = "huffman";
+                        ta->compAlg = "huffman";
                     } else {
                         // unknown extension: fall back to supplied algorithm
-                        ta.compAlg = myargs.compAlg;
+                        ta->compAlg = myargs.compAlg;
                     }
                 }
             }
 
-            // Run synchronously to avoid collisions on temporary output files used by compressors
-            operationOneFile(&ta);
-
-            free((char*)ta.inPath);
-            free((char*)ta.outPath);
+            // Crear hilo para procesar este archivo EN PARALELO
+            threads[thread_count].args = ta;
+            int ret = pthread_create(&threads[thread_count].thread, NULL, operationOneFile, ta);
+            if (ret != 0) {
+                fprintf(stderr, "Error creando hilo para %s: %s\n", entry->d_name, strerror(ret));
+                free((char*)ta->inPath);
+                free((char*)ta->outPath);
+                free(ta);
+                continue;
+            }
+            
+            printf("  → Hilo %d: procesando '%s' en paralelo...\n", thread_count + 1, entry->d_name);
+            thread_count++;
         }
         
-
         closedir(dir);
-        printf("Folder processing done.\n");
+
+        // FASE 2: Esperar a que todos los hilos terminen (join)
+        printf("\nEsperando a que terminen %d hilos...\n", thread_count);
+        for (int i = 0; i < thread_count; i++) {
+            pthread_join(threads[i].thread, NULL);
+            printf("  ✓ Hilo %d completado\n", i + 1);
+            
+            // Liberar memoria de argumentos
+            free((char*)threads[i].args->inPath);
+            free((char*)threads[i].args->outPath);
+            free(threads[i].args);
+        }
+
+        // Liberar array de hilos
+        free(threads);
+        
+        printf("\n✅ Procesamiento paralelo completado. %d archivos procesados.\n", thread_count);
     } else {
         printf("It is neither a regular file nor a directory.\n");
     }

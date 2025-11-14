@@ -30,10 +30,10 @@ typedef struct ThreadArgs{
     char* key;
 } ThreadArgs;
 
-
-static bool file_exists(const char* path);
+// Funciones auxiliares (implementadas en multiFeature.c)
+bool file_exists(const char* path);
 void get_file_base(const char* filepath, char* base, size_t size);
-static int move_file(const char* src, const char* dst);
+int move_file(const char* src, const char* dst);
 void* operationOneFile(void* arg);
 void initOperation(ThreadArgs p);
 
