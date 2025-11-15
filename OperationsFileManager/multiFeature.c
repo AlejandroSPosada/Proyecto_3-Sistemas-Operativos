@@ -6,7 +6,7 @@
 // que usan archivos temporales compartidos
 static pthread_mutex_t compression_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// forward declaration
+// Declaración anticipada
 static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size);
 
 
@@ -50,7 +50,7 @@ void* operationOneFile(void* arg) {
         // Ahora encriptar el archivo comprimido
         char encryptedFile[512];
         if (outPath) {
-            // if outPath looks like a path (contains '/'), use it as-is; otherwise treat as basename under File_Manager
+            // Si outPath parece una ruta (contiene '/'), usarla tal cual; de lo contrario tratarla como nombre base en File_Manager
             if (strchr(outPath, '/') != NULL) {
                 snprintf(encryptedFile, sizeof(encryptedFile), "%s", outPath);
             } else {
@@ -161,7 +161,7 @@ void* operationOneFile(void* arg) {
     }
     
     if (op_c) {
-        // Compression: entrada -> archivo temporal único por hilo
+        // Compresión: entrada -> archivo temporal único por hilo
         const char* temp_produced;
         const char* final_dest;
         
@@ -176,7 +176,7 @@ void* operationOneFile(void* arg) {
             }
             final_dest = dest;
         } else {
-            // Sin outPath especificado, generar nombre basado en input
+            // Sin outPath especificado, generar nombre basado en la entrada
             const char* base = get_basename(inPath);
             char name_noext[512];
             strncpy(name_noext, base, sizeof(name_noext)); 
@@ -235,7 +235,7 @@ void* operationOneFile(void* arg) {
     }
 
     if (op_d) {
-        // Decompression: entrada -> File_Manager/output.txt
+        // Descompresión: entrada -> File_Manager/output.txt
         if (!file_exists(inPath)) {
             fprintf(stderr, "Entrada no encontrada: %s\n", inPath);
             return NULL;
@@ -386,12 +386,12 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        // After decryption, check if the decrypted file contains compression metadata
+        // Después de desencriptar, verificar si el archivo desencriptado contiene metadatos de compresión
         char original_name[512];
         int is_compressed = read_original_name_from_compressed(dest, original_name, sizeof(original_name)) == 0;
 
         if (is_compressed) {
-            // Try to determine compression algorithm from filename or by trying all decompressors
+            // Intentar determinar el algoritmo de compresión desde el nombre del archivo o probando todos los descompresores
             const char* comp_ext = get_extension(inPath);
             int decomp_result = 1;
             if (comp_ext && strcmp(comp_ext, "rle") == 0) {
@@ -401,7 +401,7 @@ void* operationOneFile(void* arg) {
             } else if (comp_ext && (strcmp(comp_ext, "bin") == 0 || strcmp(comp_ext, "huff") == 0)) {
                 decomp_result = readHuffman((char*)dest);
             } else {
-                // Try decompressors until one succeeds
+                // Probar descompresores hasta que uno funcione
                 if (readRLE((char*)dest) == 0) decomp_result = 0;
                 else if (readLZW((char*)dest) == 0) decomp_result = 0;
                 else if (readHuffman((char*)dest) == 0) decomp_result = 0;
@@ -412,7 +412,7 @@ void* operationOneFile(void* arg) {
                 return NULL;
             }
 
-            // Move decompressed output to final path using original name from metadata
+            // Mover salida descomprimida a ruta final usando nombre original de los metadatos
             char folder[1024];
             if (outPath && strchr(outPath, '/') != NULL) {
                 const char* last = strrchr(outPath, '/');
@@ -434,11 +434,11 @@ void* operationOneFile(void* arg) {
             } else if (file_exists("File_Manager/output.lzw")) {
                 if (move_file("File_Manager/output.lzw", dest_final) != 0) return NULL;
             } else {
-                // fallback: move decrypted file itself
+                // Alternativa: mover el archivo desencriptado en sí mismo
                 if (move_file(dest, dest_final) != 0) return NULL;
             }
 
-            // Remove intermediate decrypted/compressed file
+            // Eliminar archivo intermedio desencriptado/comprimido
             if (file_exists(dest)) unlink(dest);
 
             printf("Archivo desencriptado y descomprimido guardado en: %s\n", dest_final);
@@ -452,7 +452,7 @@ void* operationOneFile(void* arg) {
     return NULL;
 }
 
-// Read original filename stored in compressed file's metadata (common FileMetadata at file start)
+// Leer nombre de archivo original almacenado en los metadatos del archivo comprimido (FileMetadata común al inicio del archivo)
 static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size) {
     if (!compressed_path || !out_name) return -1;
     int fd = open(compressed_path, O_RDONLY);
@@ -462,7 +462,7 @@ static int read_original_name_from_compressed(const char* compressed_path, char*
     close(fd);
     if (r != sizeof(meta)) return -1;
     if (meta.magic != METADATA_MAGIC) return -1;
-    // copy basename only
+    // Copiar solo el nombre base
     const char* orig = get_basename(meta.originalName);
     strncpy(out_name, orig, out_size);
     out_name[out_size-1] = '\0';
@@ -479,7 +479,7 @@ bool file_exists(const char* path) {
 int move_file(const char* src, const char* dst_folder) {
     struct stat st;
     if (stat(dst_folder, &st) == 0 && S_ISDIR(st.st_mode)) {
-        // dst_folder is a directory, append filename
+        // dst_folder es un directorio, agregar nombre de archivo
         const char* base = get_basename(src);
         char full_dst[1024];
         snprintf(full_dst, sizeof(full_dst), "%s/%s", dst_folder, base);
@@ -487,7 +487,7 @@ int move_file(const char* src, const char* dst_folder) {
         perror("rename");
         return -1;
     } else {
-        // dst_folder is treated as file
+        // dst_folder se trata como archivo
         if (rename(src, dst_folder) == 0) return 0;
         perror("rename");
         return -1;
@@ -523,7 +523,7 @@ void initOperation(ThreadArgs myargs) {
     } else if (S_ISDIR(st.st_mode)) {
         printf("It is a folder - processing files in PARALLEL...\n");
 
-        // Create output folder (use -o if provided, otherwise default to <input>_processed)
+        // Crear carpeta de salida (usar -o si se proporciona, de lo contrario usar <entrada>_processed por defecto)
         char outFolder[1024];
         if (myargs.outPath && myargs.outPath[0] != '\0') {
             snprintf(outFolder, sizeof(outFolder), "%s", myargs.outPath);
@@ -532,7 +532,7 @@ void initOperation(ThreadArgs myargs) {
         }
         mkdir(outFolder, 0755);
 
-        // Open directory
+        // Abrir directorio
         DIR *dir = opendir(path);
         if (!dir) { perror("Error opening directory"); return; }
 
@@ -555,7 +555,7 @@ void initOperation(ThreadArgs myargs) {
             if (stat(full_path, &entry_st) != 0 || !S_ISREG(entry_st.st_mode))
                 continue;
 
-            // Expandir array si es necesario
+            // Expandir arreglo si es necesario
             if (thread_count >= thread_capacity) {
                 thread_capacity = (thread_capacity == 0) ? 10 : thread_capacity * 2;
                 threads = realloc(threads, thread_capacity * sizeof(ThreadInfo));
@@ -577,7 +577,7 @@ void initOperation(ThreadArgs myargs) {
             ta->inPath = strdup(full_path);
 
             const char* base = get_basename(entry->d_name);
-            // strip extension from base
+            // Quitar extensión del nombre base
             char name_noext[512];
             strncpy(name_noext, base, sizeof(name_noext)); 
             name_noext[sizeof(name_noext)-1] = '\0';
@@ -586,22 +586,22 @@ void initOperation(ThreadArgs myargs) {
 
             char out_full[1024];
             
-            // If encrypting a directory, compress then encrypt so decryption can restore originals
+            // Si se encripta un directorio, comprimir primero y luego encriptar para que la desencriptación pueda restaurar los originales
             if (myargs.op_e) {
                 ta->op_e = true;
                 ta->op_c = true;
                 if (!ta->compAlg || ta->compAlg[0] == '\0') {
-                    ta->compAlg = "rle";  // default to RLE if not specified
+                    ta->compAlg = "rle";  // Usar RLE por defecto si no se especifica
                 }
                 snprintf(out_full, sizeof(out_full), "%s/%s.bin", outFolder, name_noext);
                 ta->outPath = strdup(out_full);
             }
-            // If decrypting, set outPath to the output folder so auto-descompression works
+            // Si se desencripta, establecer outPath a la carpeta de salida para que funcione la descompresión automática
             else if (myargs.op_u) {
                 snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, base);
                 ta->outPath = strdup(out_full);
             } else {
-                // Build a unique output filename inside the outFolder based on the input basename
+                // Construir un nombre de archivo de salida único dentro de outFolder basado en el nombre base de entrada
                 const char* compAlg = myargs.compAlg;
                 const char* ext = "";
                 if (strcmp(compAlg, "huffman") == 0) ext = "bin";
@@ -613,9 +613,9 @@ void initOperation(ThreadArgs myargs) {
                 else
                     snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, name_noext);
 
-                ta->outPath = strdup(out_full); // per-file destination
+                ta->outPath = strdup(out_full); // Destino por archivo
 
-                // If we're processing a directory for decompression, try to detect the algorithm per-file
+                // Si estamos procesando un directorio para descompresión, intentar detectar el algoritmo por archivo
                 if (ta->op_d) {
                     const char* fileext = get_extension(entry->d_name);
                     if (strcmp(fileext, "rle") == 0) {
@@ -625,7 +625,7 @@ void initOperation(ThreadArgs myargs) {
                     } else if (strcmp(fileext, "bin") == 0 || strcmp(fileext, "huff") == 0) {
                         ta->compAlg = "huffman";
                     } else {
-                        // unknown extension: fall back to supplied algorithm
+                        // Extensión desconocida: usar el algoritmo proporcionado
                         ta->compAlg = myargs.compAlg;
                     }
                 }
