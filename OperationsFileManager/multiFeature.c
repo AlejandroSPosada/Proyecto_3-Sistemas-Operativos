@@ -663,7 +663,7 @@ void initOperation(ThreadArgs myargs) {
         // Liberar array de hilos
         free(threads);
         
-        printf("\n✅ Procesamiento paralelo completado. %d archivos procesados.\n", thread_count);
+        printf("\nProcesamiento paralelo completado. %d archivos procesados.\n", thread_count);
     } else {
         printf("It is neither a regular file nor a directory.\n");
     }
