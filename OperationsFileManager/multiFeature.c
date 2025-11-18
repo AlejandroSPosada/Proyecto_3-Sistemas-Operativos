@@ -229,20 +229,47 @@ void* operationOneFile(void* arg) {
         }
         
         // Determinar destino final
+        char original_name[512];
+        int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
         char final_dest[1536];
         
-        // Si el usuario especificó -o, usar esa ruta
         if (outPath) {
-            if (strchr(outPath, '/') != NULL) {
-                snprintf(final_dest, sizeof(final_dest), "%s", outPath);
+            // Si el usuario especificó -o, usar esa ruta
+            // Pero si no tiene extensión, usar el nombre original del metadata
+            char* dot = strrchr((char*)outPath, '.');
+            if (!dot || dot == (char*)outPath) {
+                // Sin extensión o la ruta es solo extensión
+                if (have_original) {
+                    // Usar el nombre original del archivo del metadata
+                    if (strchr(outPath, '/') != NULL) {
+                        const char* last = strrchr(outPath, '/');
+                        size_t len = last - outPath;
+                        char folder[1024];
+                        if (len >= sizeof(folder)) len = sizeof(folder) - 1;
+                        strncpy(folder, outPath, len);
+                        folder[len] = '\0';
+                        snprintf(final_dest, sizeof(final_dest), "%s/%s", folder, get_basename(original_name));
+                    } else {
+                        snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", get_basename(original_name));
+                    }
+                } else {
+                    // Sin metadata, usar lo especificado
+                    if (strchr(outPath, '/') != NULL) {
+                        snprintf(final_dest, sizeof(final_dest), "%s", outPath);
+                    } else {
+                        snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", outPath);
+                    }
+                }
             } else {
-                snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", outPath);
+                // Tiene extensión, usar exactamente lo que el usuario especificó
+                if (strchr(outPath, '/') != NULL) {
+                    snprintf(final_dest, sizeof(final_dest), "%s", outPath);
+                } else {
+                    snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", outPath);
+                }
             }
         } else {
             // Si no especificó -o, intentar usar el nombre original de los metadatos
-            char original_name[512];
-            int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
-            
             if (have_original) {
                 snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", get_basename(original_name));
             } else {
@@ -585,12 +612,25 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
             char rel_file_path[1024];
             get_relative_path(base_input_dir, full_path, rel_file_path, sizeof(rel_file_path));
 
-            // Quitar extensión del nombre base para construir salida
+            // Construir nombre de salida según la operación
             char name_noext[512];
             strncpy(name_noext, rel_file_path, sizeof(name_noext)); 
             name_noext[sizeof(name_noext)-1] = '\0';
-            char* dot = strrchr(name_noext, '.');
-            if (dot) *dot = '\0';
+            
+            // En descompresión, solo quitar la extensión de compresión (.rle, .lzw, .bin)
+            if (myargs.op_d) {
+                char* dot = strrchr(name_noext, '.');
+                if (dot) {
+                    const char* ext = dot + 1;
+                    if (strcmp(ext, "rle") == 0 || strcmp(ext, "lzw") == 0 || strcmp(ext, "bin") == 0) {
+                        *dot = '\0';
+                    }
+                }
+            } else {
+                // En compresión/encriptación, quitar toda la extensión
+                char* dot = strrchr(name_noext, '.');
+                if (dot) *dot = '\0';
+            }
 
             char out_full[2048];
             
@@ -631,16 +671,22 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
             } 
             else {
                 // Compresión o descompresión normal
-                const char* compAlg = myargs.compAlg;
-                const char* ext = "";
-                if (strcmp(compAlg, "huffman") == 0) ext = "bin";
-                else if (strcmp(compAlg, "rle") == 0) ext = "rle";
-                else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
-
-                if (ext[0] != '\0')
-                    snprintf(out_full, sizeof(out_full), "%s/%s.%s", base_output_dir, name_noext, ext);
-                else
+                if (ta->op_d) {
+                    // En descompresión: usar el nombre sin la extensión de compresión
                     snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, name_noext);
+                } else {
+                    // En compresión: agregar la extensión de compresión
+                    const char* compAlg = myargs.compAlg;
+                    const char* ext = "";
+                    if (strcmp(compAlg, "huffman") == 0) ext = "bin";
+                    else if (strcmp(compAlg, "rle") == 0) ext = "rle";
+                    else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
+
+                    if (ext[0] != '\0')
+                        snprintf(out_full, sizeof(out_full), "%s/%s.%s", base_output_dir, name_noext, ext);
+                    else
+                        snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, name_noext);
+                }
 
                 ta->outPath = strdup(out_full);
 
