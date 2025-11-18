@@ -14,6 +14,41 @@
 #define MAX_TREE_HT 512
 #define MAX_CHARS 256
 
+typedef struct {
+    int fd;
+    uint64_t buffer;
+    int bitCount;
+    uint64_t totalBits;
+} BitWriter64;
+
+static void bitwriter64_init(BitWriter64* bw, int fd) {
+    bw->fd = fd;
+    bw->buffer = 0;
+    bw->bitCount = 0;
+    bw->totalBits = 0;
+}
+
+static inline void bitwriter64_write_bit(BitWriter64* bw, int bit) {
+    bw->buffer |= ((uint64_t)(bit & 1) << (63 - bw->bitCount));
+    bw->bitCount++;
+    bw->totalBits++;
+
+    if (bw->bitCount == 64) {
+        posix_write_full(bw->fd, &bw->buffer, sizeof(uint64_t));
+        bw->buffer = 0;
+        bw->bitCount = 0;
+    }
+}
+
+static inline void bitwriter64_flush(BitWriter64* bw) {
+    if (bw->bitCount > 0) {
+        int bytesToWrite = (bw->bitCount + 7) / 8;
+        uint64_t out = bw->buffer;
+        posix_write_full(bw->fd, &out, bytesToWrite);
+    }
+}
+
+
 // ===== BitWriter para POSIX =====
 typedef struct {
     int fd;              // File descriptor en lugar de FILE*
@@ -353,19 +388,20 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     posix_write_full(fd_output, &placeholder, sizeof(uint32_t));
 
     // Inicializar BitWriter con POSIX
-    BitWriter_POSIX bw;
-    bitwriter_init_posix(&bw, fd_output);
+    BitWriter64 bw;
+    bitwriter64_init(&bw, fd_output);
+
 
     // Codificar texto en bits
     for (ssize_t i = 0; i < bytes_read; i++) {
         char* code = codes[(unsigned char)arr[i]];
         for (int j = 0; code[j] != '\0'; j++) {
-            bitwriter_write_bit_posix(&bw, code[j] == '1' ? 1 : 0);
+            bitwriter64_write_bit(&bw, code[j] == '1' ? 1 : 0);
         }
     }
 
     // Flush bits pendientes
-    bitwriter_flush_posix(&bw);
+    bitwriter64_flush(&bw);
     int totalBits = bw.totalBits;
 
     // Escribir totalBits en la posición reservada
