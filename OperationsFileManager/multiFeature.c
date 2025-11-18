@@ -491,6 +491,20 @@ typedef struct {
     int capacity;
 } ThreadPool;
 
+// Función auxiliar para crear carpetas padre necesarias para un archivo
+static void ensure_parent_directory_exists(const char* file_path) {
+    char path[2048];
+    strncpy(path, file_path, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    
+    char* last_slash = strrchr(path, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        // Crear directorio recursivamente
+        mkdir(path, 0755);
+    }
+}
+
 // Función auxiliar para crear carpeta si no existe
 void ensure_directory_exists(const char* dir_path) {
     struct stat st;
@@ -588,18 +602,39 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
 
             char out_full[2048];
             
-            // Si se encripta un directorio, comprimir primero y luego encriptar
-            if (myargs.op_e) {
+            // Si se encripta un directorio, comprimir primero y luego encriptar (solo si es -ce combinado)
+            if (myargs.op_e && myargs.op_c) {
+                // -ce: comprimir primero, luego encriptar
                 ta->op_e = true;
                 ta->op_c = true;
                 if (!ta->compAlg || ta->compAlg[0] == '\0') {
                     ta->compAlg = "rle";
                 }
                 snprintf(out_full, sizeof(out_full), "%s/%s.bin", base_output_dir, name_noext);
+                ta->outPath = strdup(out_full);
+            }
+            // Si solo se encripta (-e sin -c)
+            else if (myargs.op_e) {
+                // -e: solo encriptar, sin comprimir
+                snprintf(out_full, sizeof(out_full), "%s/%s.bin", base_output_dir, rel_file_path);
+                ta->outPath = strdup(out_full);
             }
             // Si se desencripta
             else if (myargs.op_u) {
-                snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, rel_file_path);
+                // Cuando desencriptamos, quitamos la extensión .bin (que fue la extensión del encriptado)
+                char decrypted_name[1024];
+                strncpy(decrypted_name, rel_file_path, sizeof(decrypted_name) - 1);
+                decrypted_name[sizeof(decrypted_name) - 1] = '\0';
+                
+                // Quitar extensión .bin si existe
+                if (strlen(decrypted_name) > 4) {
+                    char* dot = decrypted_name + strlen(decrypted_name) - 4;
+                    if (strcmp(dot, ".bin") == 0) {
+                        *dot = '\0';
+                    }
+                }
+                
+                snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, decrypted_name);
                 ta->outPath = strdup(out_full);
             } 
             else {
@@ -631,6 +666,9 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
                     }
                 }
             }
+
+            // Crear carpetas padre necesarias para el archivo de salida
+            ensure_parent_directory_exists(out_full);
 
             // Crear hilo para procesar este archivo EN PARALELO
             ta->thread_index = pool->count + 1;  // Asignar número de hilo
