@@ -36,8 +36,8 @@ struct MinHeap* createAndBuildMinHeap(char data[], int freq[], int size);
 struct MinHeapNode* buildHuffmanTree(char data[], int freq[], int size);
 void printCodes(struct MinHeapNode* root, int arr[], int top);
 void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]);
-void writeHuffman(char arr[]);
+void writeHuffman(char inputFile[], char outputFile[]);
 void decodeHuffman(struct MinHeapNode*, unsigned char*, int, int);
-int readHuffman(char arr[]);
+int readHuffman(char inputFile[], char outputFile[]);
 
 #endif

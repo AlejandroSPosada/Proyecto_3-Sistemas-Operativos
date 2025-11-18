@@ -18,7 +18,7 @@
  * Encodes consecutive runs of the same byte as [count][byte] pairs
  * Uses uint32_t for counts to handle long runs efficiently
  */
-void writeRLE(char inputFile[]) {
+void writeRLE(char inputFile[], char outputFile[]) {
     // Abrir archivo de entrada con POSIX
     int fd_input = posix_open_read(inputFile);
     if (fd_input == -1) {
@@ -60,7 +60,7 @@ void writeRLE(char inputFile[]) {
     }
 
     // Abrir archivo de salida con POSIX
-    int fd_output = posix_open_write("File_Manager/output.rle");
+    int fd_output = posix_open_write(outputFile);
     if (fd_output == -1) {
         free(data);
         return;
@@ -120,7 +120,7 @@ void writeRLE(char inputFile[]) {
  * Run-Length Encoding Decompression (POSIX VERSION)
  * Reads [count][byte] pairs and expands them to original data
  */
-int readRLE(char inputFile[]) {
+int readRLE(char inputFile[], char outputFile[]) {
     // Abrir archivo comprimido con POSIX
     int fd_input = posix_open_read(inputFile);
     if (fd_input == -1) {
@@ -201,7 +201,7 @@ int readRLE(char inputFile[]) {
     }
 
     // Escribir datos descomprimidos al archivo de salida con POSIX
-    int fd_output = posix_open_write("File_Manager/output.txt");
+    int fd_output = posix_open_write(outputFile);
     if (fd_output == -1) {
         free(output);
         return 1;

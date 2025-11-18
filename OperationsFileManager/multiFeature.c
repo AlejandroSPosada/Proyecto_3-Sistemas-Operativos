@@ -2,10 +2,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-// Mutex global para proteger operaciones de compresión/descompresión
-// que usan archivos temporales compartidos
-static pthread_mutex_t compression_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 // Declaración anticipada
 static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size);
 
@@ -27,16 +23,19 @@ void* operationOneFile(void* arg) {
         // Combinación -ce: comprimir primero, luego encriptar
         if (!key) { fprintf(stderr, "-k [clave] es obligatorio para -ce\n"); return NULL; }
         
-        const char* compressedFile;
+        // Generar nombre único temporal para el archivo comprimido usando thread ID
+        pthread_t tid = pthread_self();
+        char compressedFile[512];
+        
         if (strcmp(compAlg, "huffman") == 0) {
-            writeHuffman((char*)inPath);
-            compressedFile = "File_Manager/output.bin";
+            snprintf(compressedFile, sizeof(compressedFile), "File_Manager/temp_%lu.bin", (unsigned long)tid);
+            writeHuffman((char*)inPath, compressedFile);
         } else if (strcmp(compAlg, "rle") == 0) {
-            writeRLE((char*)inPath);
-            compressedFile = "File_Manager/output.rle";
+            snprintf(compressedFile, sizeof(compressedFile), "File_Manager/temp_%lu.rle", (unsigned long)tid);
+            writeRLE((char*)inPath, compressedFile);
         } else if (strcmp(compAlg, "lzw") == 0) {
-            writeLZW((char*)inPath);
-            compressedFile = "File_Manager/output.lzw";
+            snprintf(compressedFile, sizeof(compressedFile), "File_Manager/temp_%lu.lzw", (unsigned long)tid);
+            writeLZW((char*)inPath, compressedFile);
         } else {
             fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
             return NULL;
@@ -78,6 +77,9 @@ void* operationOneFile(void* arg) {
         }
         
         printf("Archivo comprimido y encriptado guardado en: %s\n", encryptedFile);
+        
+        // Limpiar archivo temporal
+        remove(compressedFile);
         return NULL;
     }
     
@@ -112,14 +114,18 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        // Paso 2: Descomprimir el archivo desencriptado
+        // Paso 2: Descomprimir el archivo desencriptado usando nombre temporal único
+        pthread_t tid = pthread_self();
+        char decompressedFile[512];
+        snprintf(decompressedFile, sizeof(decompressedFile), "File_Manager/temp_%lu_decomp.txt", (unsigned long)tid);
+        
         int result;
         if (strcmp(compAlg, "huffman") == 0) {
-            result = readHuffman((char*)decryptedFile);
+            result = readHuffman((char*)decryptedFile, decompressedFile);
         } else if (strcmp(compAlg, "rle") == 0) {
-            result = readRLE((char*)decryptedFile);
+            result = readRLE((char*)decryptedFile, decompressedFile);
         } else if (strcmp(compAlg, "lzw") == 0) {
-            result = readLZW((char*)decryptedFile);
+            result = readLZW((char*)decryptedFile, decompressedFile);
         } else {
             fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
             remove(decryptedFile);
@@ -131,12 +137,12 @@ void* operationOneFile(void* arg) {
         
         if (result != 0) {
             fprintf(stderr, "Fallo al descomprimir\n");
+            remove(decompressedFile);
             return NULL;
         }
         
-        const char* produced = "File_Manager/output.txt";
-        if (!file_exists(produced)) {
-            fprintf(stderr, "No se encontró salida de descompresión: %s\n", produced);
+        if (!file_exists(decompressedFile)) {
+            fprintf(stderr, "No se encontró salida de descompresión: %s\n", decompressedFile);
             return NULL;
         }
         
@@ -148,33 +154,30 @@ void* operationOneFile(void* arg) {
                 const char* base = get_basename(outPath);
                 snprintf(dest, sizeof(dest), "File_Manager/%s", base);
             }
-            if (strcmp(dest, produced) != 0) {
-                if (move_file(produced, dest) != 0) return NULL;
+            if (strcmp(dest, decompressedFile) != 0) {
+                if (move_file(decompressedFile, dest) != 0) return NULL;
                 printf("Archivo desencriptado y descomprimido guardado en: %s\n", dest);
             } else {
-                printf("Archivo desencriptado y descomprimido guardado en: %s\n", produced);
+                printf("Archivo desencriptado y descomprimido guardado en: %s\n", decompressedFile);
             }
         } else {
-            printf("Archivo desencriptado y descomprimido guardado en: %s\n", produced);
+            printf("Archivo desencriptado y descomprimido guardado en: %s\n", decompressedFile);
         }
         return NULL;
     }
     
     if (op_c) {
-        // Compresión: entrada -> archivo temporal único por hilo
-        const char* temp_produced;
-        const char* final_dest;
+        // Compresión: entrada -> archivo de salida final directamente
         
-        // Determinar destino final ANTES de comprimir
-        char dest[512];
+        // Determinar destino final
+        char final_dest[512];
         if (outPath) {
             if (strchr(outPath, '/') != NULL) {
-                snprintf(dest, sizeof(dest), "%s", outPath);
+                snprintf(final_dest, sizeof(final_dest), "%s", outPath);
             } else {
                 const char* base = get_basename(outPath);
-                snprintf(dest, sizeof(dest), "File_Manager/%s", base);
+                snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", base);
             }
-            final_dest = dest;
         } else {
             // Sin outPath especificado, generar nombre basado en la entrada
             const char* base = get_basename(inPath);
@@ -189,59 +192,38 @@ void* operationOneFile(void* arg) {
             else if (strcmp(compAlg, "rle") == 0) ext = "rle";
             else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
             
-            snprintf(dest, sizeof(dest), "File_Manager/%s.%s", name_noext, ext);
-            final_dest = dest;
+            snprintf(final_dest, sizeof(final_dest), "File_Manager/%s.%s", name_noext, ext);
         }
         
-        // BLOQUEAR: Solo un hilo puede comprimir a la vez (evita race condition en File_Manager/output.XXX)
-        pthread_mutex_lock(&compression_mutex);
-        
-        // Comprimir (esto genera File_Manager/output.XXX)
+        // Comprimir directamente al destino final (sin mutex, sin archivos temporales compartidos)
         if (strcmp(compAlg, "huffman") == 0) {
-            writeHuffman((char*)inPath);
-            temp_produced = "File_Manager/output.bin";
+            writeHuffman((char*)inPath, final_dest);
         } else if (strcmp(compAlg, "rle") == 0) {
-            writeRLE((char*)inPath);
-            temp_produced = "File_Manager/output.rle";
+            writeRLE((char*)inPath, final_dest);
         } else if (strcmp(compAlg, "lzw") == 0) {
-            writeLZW((char*)inPath);
-            temp_produced = "File_Manager/output.lzw";
+            writeLZW((char*)inPath, final_dest);
         } else {
             fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
-            pthread_mutex_unlock(&compression_mutex);
             return NULL;
         }
         
-        // CRÍTICO: Mover INMEDIATAMENTE a destino final para evitar que otro hilo lo sobrescriba
-        if (!file_exists(temp_produced)) {
-            fprintf(stderr, "[Thread] No se encontró salida de compresión: %s\n", temp_produced);
-            pthread_mutex_unlock(&compression_mutex);
+        if (!file_exists(final_dest)) {
+            fprintf(stderr, "[Thread] No se encontró salida de compresión: %s\n", final_dest);
             return NULL;
         }
-        
-        // Mover el archivo temporal al destino final
-        if (rename(temp_produced, final_dest) != 0) {
-            fprintf(stderr, "[Thread] Error moviendo %s -> %s: %s\n", 
-                    temp_produced, final_dest, strerror(errno));
-            pthread_mutex_unlock(&compression_mutex);
-            return NULL;
-        }
-        
-        // DESBLOQUEAR: Permitir que otro hilo comprima
-        pthread_mutex_unlock(&compression_mutex);
         
         printf("Archivo comprimido guardado en: %s\n", final_dest);
         return NULL;
     }
 
     if (op_d) {
-        // Descompresión: entrada -> File_Manager/output.txt
+        // Descompresión: entrada -> destino final directamente
         if (!file_exists(inPath)) {
             fprintf(stderr, "Entrada no encontrada: %s\n", inPath);
             return NULL;
         }
         
-        // Determinar destino final primero
+        // Determinar destino final
         char original_name[512];
         int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
         char final_dest[1536];
@@ -271,44 +253,28 @@ void* operationOneFile(void* arg) {
             }
         }
         
-        // BLOQUEAR: Un solo hilo puede descomprimir a la vez
-        pthread_mutex_lock(&compression_mutex);
-        
+        // Descomprimir directamente al destino final (sin mutex)
         int result;
         if (strcmp(compAlg, "huffman") == 0) {
-            result = readHuffman((char*)inPath);
+            result = readHuffman((char*)inPath, final_dest);
         } else if (strcmp(compAlg, "rle") == 0) {
-            result = readRLE((char*)inPath);
+            result = readRLE((char*)inPath, final_dest);
         } else if (strcmp(compAlg, "lzw") == 0) {
-            result = readLZW((char*)inPath);
+            result = readLZW((char*)inPath, final_dest);
         } else {
             fprintf(stderr, "Algoritmo desconocido: %s\n", compAlg);
-            pthread_mutex_unlock(&compression_mutex);
             return NULL;
         }
         
         if (result != 0) {
             fprintf(stderr, "Fallo al descomprimir %s\n", inPath);
-            pthread_mutex_unlock(&compression_mutex);
             return NULL;
-        }
-        const char* produced = "File_Manager/output.txt";
-        if (!file_exists(produced)) {
-            fprintf(stderr, "No se encontró salida de descompresión: %s\n", produced);
-            pthread_mutex_unlock(&compression_mutex);
-            return NULL;
-        }
-
-        // Mover inmediatamente al destino final
-        if (strcmp(final_dest, produced) != 0) {
-            if (move_file(produced, final_dest) != 0) {
-                pthread_mutex_unlock(&compression_mutex);
-                return NULL;
-            }
         }
         
-        // DESBLOQUEAR: Permitir que otro hilo descomprima
-        pthread_mutex_unlock(&compression_mutex);
+        if (!file_exists(final_dest)) {
+            fprintf(stderr, "No se encontró salida de descompresión: %s\n", final_dest);
+            return NULL;
+        }
         
         printf("Archivo descomprimido guardado en: %s\n", final_dest);
         return NULL;
@@ -392,23 +358,29 @@ void* operationOneFile(void* arg) {
 
         if (is_compressed) {
             // Intentar determinar el algoritmo de compresión desde el nombre del archivo o probando todos los descompresores
+            // Generar archivo temporal único para descompresión
+            pthread_t tid = pthread_self();
+            char decompressed_temp[512];
+            snprintf(decompressed_temp, sizeof(decompressed_temp), "File_Manager/temp_%lu_decomp.txt", (unsigned long)tid);
+            
             const char* comp_ext = get_extension(inPath);
             int decomp_result = 1;
             if (comp_ext && strcmp(comp_ext, "rle") == 0) {
-                decomp_result = readRLE((char*)dest);
+                decomp_result = readRLE((char*)dest, decompressed_temp);
             } else if (comp_ext && strcmp(comp_ext, "lzw") == 0) {
-                decomp_result = readLZW((char*)dest);
+                decomp_result = readLZW((char*)dest, decompressed_temp);
             } else if (comp_ext && (strcmp(comp_ext, "bin") == 0 || strcmp(comp_ext, "huff") == 0)) {
-                decomp_result = readHuffman((char*)dest);
+                decomp_result = readHuffman((char*)dest, decompressed_temp);
             } else {
                 // Probar descompresores hasta que uno funcione
-                if (readRLE((char*)dest) == 0) decomp_result = 0;
-                else if (readLZW((char*)dest) == 0) decomp_result = 0;
-                else if (readHuffman((char*)dest) == 0) decomp_result = 0;
+                if (readRLE((char*)dest, decompressed_temp) == 0) decomp_result = 0;
+                else if (readLZW((char*)dest, decompressed_temp) == 0) decomp_result = 0;
+                else if (readHuffman((char*)dest, decompressed_temp) == 0) decomp_result = 0;
             }
 
             if (decomp_result != 0) {
                 fprintf(stderr, "Fallo al descomprimir archivo desencriptado: %s\n", dest);
+                remove(decompressed_temp);
                 return NULL;
             }
 
@@ -427,12 +399,8 @@ void* operationOneFile(void* arg) {
             char dest_final[1536];
             snprintf(dest_final, sizeof(dest_final), "%s/%s", folder, get_basename(original_name));
 
-            if (file_exists("File_Manager/output.txt")) {
-                if (move_file("File_Manager/output.txt", dest_final) != 0) return NULL;
-            } else if (file_exists("File_Manager/output.bin")) {
-                if (move_file("File_Manager/output.bin", dest_final) != 0) return NULL;
-            } else if (file_exists("File_Manager/output.lzw")) {
-                if (move_file("File_Manager/output.lzw", dest_final) != 0) return NULL;
+            if (file_exists(decompressed_temp)) {
+                if (move_file(decompressed_temp, dest_final) != 0) return NULL;
             } else {
                 // Alternativa: mover el archivo desencriptado en sí mismo
                 if (move_file(dest, dest_final) != 0) return NULL;

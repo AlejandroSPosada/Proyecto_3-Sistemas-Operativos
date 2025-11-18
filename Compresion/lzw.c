@@ -46,7 +46,7 @@ static int findInDict(LZWEntry *dic, int dictSize, const unsigned char* data, si
     return -1;
 }
 
-void writeLZW(char inputFile[]) {
+void writeLZW(char inputFile[], char outputFile[]) {
     // Abrir archivo con POSIX
     int fd_input = posix_open_read(inputFile);
     if (fd_input == -1) return;
@@ -131,7 +131,7 @@ void writeLZW(char inputFile[]) {
     }
 
     // Abrir archivo de salida con POSIX
-    int fd_output = posix_open_write("File_Manager/output.lzw");
+    int fd_output = posix_open_write(outputFile);
     if (fd_output == -1) {
         free(buf); free(codes); freeDictionary(dict, dictSize);
         if (w) free(w);
@@ -179,7 +179,7 @@ void writeLZW(char inputFile[]) {
     freeDictionary(dict, dictSize);
 }
 
-int readLZW(char inputFile[]) {
+int readLZW(char inputFile[], char outputFile[]) {
     // Abrir archivo con POSIX
     int fd_input = posix_open_read(inputFile);
     if (fd_input == -1) return 1;
@@ -293,7 +293,7 @@ int readLZW(char inputFile[]) {
     }
 
     // Escribir salida con POSIX
-    int fd_output = posix_open_write("File_Manager/output.txt");
+    int fd_output = posix_open_write(outputFile);
     if (fd_output == -1) {
         free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize);
         return 1;

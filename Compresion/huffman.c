@@ -246,7 +246,7 @@ void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]) 
 
 // --- Write in .bin ---
 // --- Write in .bin (POSIX VERSION) ---
-void writeHuffman(char inputFile[]) {
+void writeHuffman(char inputFile[], char outputFile[]) {
     // Abrir archivo de entrada con POSIX
     int fd_input = posix_open_read(inputFile);
     if (fd_input == -1) return;
@@ -308,7 +308,7 @@ void writeHuffman(char inputFile[]) {
     HuffmanCodes(chars, freqs_int, size, codes);
 
     // Abrir archivo de salida con POSIX
-    int fd_output = posix_open_write("File_Manager/output.bin");
+    int fd_output = posix_open_write(outputFile);
     if (fd_output == -1) {
         free(arr);
         return;
@@ -415,9 +415,9 @@ void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBi
     }
 }
 
-int readHuffman(char arr[]) {
+int readHuffman(char inputFile[], char outputFile[]) {
     // Abrir archivo comprimido con POSIX
-    int fd_input = posix_open_read(arr);
+    int fd_input = posix_open_read(inputFile);
     if (fd_input == -1) return 1;
 
     // Leer metadata header
@@ -520,7 +520,7 @@ int readHuffman(char arr[]) {
     }
 
     // Abrir archivo de salida con POSIX
-    int fd_output = posix_open_write("File_Manager/output.txt");
+    int fd_output = posix_open_write(outputFile);
     if (fd_output == -1) {
         freeHuffmanTree(root);
         free(chars); free(freqs); free(encodedData);
