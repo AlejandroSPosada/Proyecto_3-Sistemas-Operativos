@@ -15,6 +15,7 @@
 #include "lzw.h"
 #include "aes.h"
 #include <dirent.h>
+#include <time.h>
 
 // this header is in charge of the interaction of the user with the File_Manager, and also the multithread feature.
 
@@ -28,6 +29,10 @@ typedef struct ThreadArgs{
     char* inPath;
     char* outPath;
     char* key;
+    int thread_index;           // Número del hilo para impresión
+    char* thread_file_name;     // Nombre del archivo siendo procesado
+    struct timespec start_time; // Tiempo de inicio
+    double elapsed_time;        // Tiempo transcurrido en segundos
 } ThreadArgs;
 
 // Funciones auxiliares (implementadas en multiFeature.c)

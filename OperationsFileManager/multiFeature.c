@@ -2,12 +2,17 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-// Declaración anticipada
+// Declaraciones anticipadas
 static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size);
+static double get_elapsed_time(struct timespec start_time);
 
 
 void* operationOneFile(void* arg) {
     struct ThreadArgs* args = (struct ThreadArgs*)arg;
+    
+    // Capturar tiempo de inicio
+    clock_gettime(CLOCK_MONOTONIC, &args->start_time);
+    
     bool op_c = args->op_c;
     bool op_d = args->op_d;
     bool op_e = args->op_e; 
@@ -76,10 +81,11 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        printf("Archivo comprimido y encriptado guardado en: %s\n", encryptedFile);
-        
         // Limpiar archivo temporal
         remove(compressedFile);
+        
+        double elapsed = get_elapsed_time(args->start_time);
+        printf("[Hilo %d] %s (%.1fs)\n", args->thread_index, args->thread_file_name, elapsed);
         return NULL;
     }
     
@@ -156,13 +162,11 @@ void* operationOneFile(void* arg) {
             }
             if (strcmp(dest, decompressedFile) != 0) {
                 if (move_file(decompressedFile, dest) != 0) return NULL;
-                printf("Archivo desencriptado y descomprimido guardado en: %s\n", dest);
-            } else {
-                printf("Archivo desencriptado y descomprimido guardado en: %s\n", decompressedFile);
             }
-        } else {
-            printf("Archivo desencriptado y descomprimido guardado en: %s\n", decompressedFile);
         }
+        
+        double elapsed = get_elapsed_time(args->start_time);
+        printf("[Hilo %d] %s (%.1fs)\n", args->thread_index, args->thread_file_name, elapsed);
         return NULL;
     }
     
@@ -212,7 +216,8 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        printf("Archivo comprimido guardado en: %s\n", final_dest);
+        double elapsed = get_elapsed_time(args->start_time);
+        printf("[Hilo %d] %s (%.1fs)\n", args->thread_index, args->thread_file_name, elapsed);
         return NULL;
     }
 
@@ -276,7 +281,8 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        printf("Archivo descomprimido guardado en: %s\n", final_dest);
+        double elapsed = get_elapsed_time(args->start_time);
+        printf("[Hilo %d] %s (%.1fs)\n", args->thread_index, args->thread_file_name, elapsed);
         return NULL;
     }
 
@@ -314,7 +320,8 @@ void* operationOneFile(void* arg) {
             return NULL;
         }
         
-        printf("Archivo encriptado guardado en: %s\n", dest);
+        double elapsed = get_elapsed_time(args->start_time);
+        printf("[Hilo %d] %s (%.1fs)\n", args->thread_index, args->thread_file_name, elapsed);
         return NULL;
     }
 
@@ -408,13 +415,12 @@ void* operationOneFile(void* arg) {
 
             // Eliminar archivo intermedio desencriptado/comprimido
             if (file_exists(dest)) unlink(dest);
-
-            printf("Archivo desencriptado y descomprimido guardado en: %s\n", dest_final);
-            return NULL;
         }
         
-        printf("Archivo desencriptado guardado en: %s\n", dest);
+        double elapsed = get_elapsed_time(args->start_time);
+        printf("[Hilo %d] %s (%.1fs)\n", args->thread_index, args->thread_file_name, elapsed);
         return NULL;
+
     }
 
     return NULL;
@@ -435,6 +441,16 @@ static int read_original_name_from_compressed(const char* compressed_path, char*
     strncpy(out_name, orig, out_size);
     out_name[out_size-1] = '\0';
     return 0;
+}
+
+// Función auxiliar para calcular el tiempo transcurrido en segundos
+static double get_elapsed_time(struct timespec start_time) {
+    struct timespec end_time;
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
+    
+    double elapsed = (double)(end_time.tv_sec - start_time.tv_sec) + 
+                     (double)(end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+    return elapsed;
 }
 
 // Verificar si el archivo existe
@@ -468,10 +484,183 @@ typedef struct {
     ThreadArgs* args;
 } ThreadInfo;
 
+// Estructura para gestionar arrays dinámicos de hilos a través de recursión
+typedef struct {
+    ThreadInfo* threads;
+    int count;
+    int capacity;
+} ThreadPool;
+
+// Función auxiliar para crear carpeta si no existe
+void ensure_directory_exists(const char* dir_path) {
+    struct stat st;
+    if (stat(dir_path, &st) != 0) {
+        mkdir(dir_path, 0755);
+    }
+}
+
+// Función auxiliar para obtener la ruta relativa desde la carpeta base
+// Por ejemplo: si base="/input", full="/input/sub/file.txt", retorna "sub/file.txt"
+static void get_relative_path(const char* base, const char* full, char* rel, size_t rel_size) {
+    size_t base_len = strlen(base);
+    if (strncmp(full, base, base_len) == 0) {
+        if (full[base_len] == '/') {
+            strncpy(rel, full + base_len + 1, rel_size - 1);
+        } else {
+            strncpy(rel, full + base_len, rel_size - 1);
+        }
+    } else {
+        strncpy(rel, full, rel_size - 1);
+    }
+    rel[rel_size - 1] = '\0';
+}
+
+// Función recursiva para procesar directorios y crear hilos para archivos
+static void process_directory_recursive(const char* base_input_dir, const char* current_dir, 
+                                       const char* base_output_dir, ThreadArgs myargs,
+                                       ThreadPool* pool, int* global_thread_count) {
+    DIR *dir = opendir(current_dir);
+    if (!dir) { 
+        perror("Error opening directory"); 
+        return; 
+    }
+
+    struct dirent *entry;
+    
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char full_path[2048];
+        snprintf(full_path, sizeof(full_path), "%s/%s", current_dir, entry->d_name);
+
+        struct stat entry_st;
+        if (stat(full_path, &entry_st) != 0)
+            continue;
+
+        // Si es un directorio: recursión + crear carpeta de salida correspondiente
+        if (S_ISDIR(entry_st.st_mode)) {
+            char rel_path[1024];
+            get_relative_path(base_input_dir, full_path, rel_path, sizeof(rel_path));
+            
+            char output_subdir[2048];
+            snprintf(output_subdir, sizeof(output_subdir), "%s/%s", base_output_dir, rel_path);
+            ensure_directory_exists(output_subdir);
+            
+            printf("  → Entrando en subdirectorio: %s\n", rel_path);
+            process_directory_recursive(base_input_dir, full_path, base_output_dir, myargs, pool, global_thread_count);
+            continue;
+        }
+
+        // Si es un archivo regular: crear hilo para procesarlo
+        if (S_ISREG(entry_st.st_mode)) {
+            // Expandir arreglo si es necesario
+            if (pool->count >= pool->capacity) {
+                pool->capacity = (pool->capacity == 0) ? 20 : pool->capacity * 2;
+                pool->threads = realloc(pool->threads, pool->capacity * sizeof(ThreadInfo));
+                if (!pool->threads) {
+                    perror("Error al reservar memoria para hilos");
+                    closedir(dir);
+                    return;
+                }
+            }
+
+            // Preparar argumentos para este archivo
+            ThreadArgs* ta = malloc(sizeof(ThreadArgs));
+            if (!ta) {
+                perror("Error al reservar memoria para ThreadArgs");
+                continue;
+            }
+            
+            *ta = myargs;
+            ta->inPath = strdup(full_path);
+
+            // Obtener ruta relativa del archivo desde el directorio base
+            char rel_file_path[1024];
+            get_relative_path(base_input_dir, full_path, rel_file_path, sizeof(rel_file_path));
+
+            // Quitar extensión del nombre base para construir salida
+            char name_noext[512];
+            strncpy(name_noext, rel_file_path, sizeof(name_noext)); 
+            name_noext[sizeof(name_noext)-1] = '\0';
+            char* dot = strrchr(name_noext, '.');
+            if (dot) *dot = '\0';
+
+            char out_full[2048];
+            
+            // Si se encripta un directorio, comprimir primero y luego encriptar
+            if (myargs.op_e) {
+                ta->op_e = true;
+                ta->op_c = true;
+                if (!ta->compAlg || ta->compAlg[0] == '\0') {
+                    ta->compAlg = "rle";
+                }
+                snprintf(out_full, sizeof(out_full), "%s/%s.bin", base_output_dir, name_noext);
+            }
+            // Si se desencripta
+            else if (myargs.op_u) {
+                snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, rel_file_path);
+                ta->outPath = strdup(out_full);
+            } 
+            else {
+                // Compresión o descompresión normal
+                const char* compAlg = myargs.compAlg;
+                const char* ext = "";
+                if (strcmp(compAlg, "huffman") == 0) ext = "bin";
+                else if (strcmp(compAlg, "rle") == 0) ext = "rle";
+                else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
+
+                if (ext[0] != '\0')
+                    snprintf(out_full, sizeof(out_full), "%s/%s.%s", base_output_dir, name_noext, ext);
+                else
+                    snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, name_noext);
+
+                ta->outPath = strdup(out_full);
+
+                // Detectar algoritmo por extensión en descompresión
+                if (ta->op_d) {
+                    const char* fileext = get_extension(entry->d_name);
+                    if (strcmp(fileext, "rle") == 0) {
+                        ta->compAlg = "rle";
+                    } else if (strcmp(fileext, "lzw") == 0) {
+                        ta->compAlg = "lzw";
+                    } else if (strcmp(fileext, "bin") == 0 || strcmp(fileext, "huff") == 0) {
+                        ta->compAlg = "huffman";
+                    } else {
+                        ta->compAlg = myargs.compAlg;
+                    }
+                }
+            }
+
+            // Crear hilo para procesar este archivo EN PARALELO
+            ta->thread_index = pool->count + 1;  // Asignar número de hilo
+            ta->thread_file_name = strdup(rel_file_path);  // Asignar nombre de archivo
+            
+            pool->threads[pool->count].args = ta;
+            int ret = pthread_create(&pool->threads[pool->count].thread, NULL, operationOneFile, ta);
+            if (ret != 0) {
+                fprintf(stderr, "Error creando hilo para %s: %s\n", entry->d_name, strerror(ret));
+                free((char*)ta->inPath);
+                free((char*)ta->outPath);
+                free((char*)ta->thread_file_name);
+                free(ta);
+                continue;
+            }
+            
+            printf("  → Hilo %d: procesando '%s' en paralelo...\n", ta->thread_index, rel_file_path);
+            pool->count++;
+            (*global_thread_count)++;
+        }
+    }
+    
+    closedir(dir);
+}
+
 /*
 Here we start with the interaction with File_Manager. 
 First let's realize if we are dealing with a file or a folder. 
 If only a file, then only a thread. If a folder, then let's use several threads IN PARALLEL.
+Now it recursively processes subdirectories while maintaining folder structure.
 */
 void initOperation(ThreadArgs myargs) {
     const char *path = myargs.inPath;
@@ -489,149 +678,41 @@ void initOperation(ThreadArgs myargs) {
         pthread_join(thread1, NULL);
         return;
     } else if (S_ISDIR(st.st_mode)) {
-        printf("It is a folder - processing files in PARALLEL...\n");
+        printf("It is a folder - processing files RECURSIVELY in PARALLEL...\n");
 
-        // Crear carpeta de salida (usar -o si se proporciona, de lo contrario usar <entrada>_processed por defecto)
+        // Crear carpeta de salida
         char outFolder[1024];
         if (myargs.outPath && myargs.outPath[0] != '\0') {
             snprintf(outFolder, sizeof(outFolder), "%s", myargs.outPath);
         } else {
             snprintf(outFolder, sizeof(outFolder), "%s_processed", path);
         }
-        mkdir(outFolder, 0755);
+        ensure_directory_exists(outFolder);
 
-        // Abrir directorio
-        DIR *dir = opendir(path);
-        if (!dir) { perror("Error opening directory"); return; }
+        // Inicializar pool de hilos
+        ThreadPool pool = {0};
+        int global_thread_count = 0;
 
-        // Array dinámico para almacenar información de hilos
-        ThreadInfo* threads = NULL;
-        int thread_count = 0;
-        int thread_capacity = 0;
+        // FASE 1: Recorrer recursivamente y crear hilos
+        printf("\nFASE 1: Escaneando directorios y creando hilos...\n");
+        process_directory_recursive(path, path, outFolder, myargs, &pool, &global_thread_count);
 
-        struct dirent *entry;
-
-        // FASE 1: Crear todos los hilos (ejecución paralela)
-        while ((entry = readdir(dir)) != NULL) {
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-                continue;
-
-            char full_path[1024];
-            snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-
-            struct stat entry_st;
-            if (stat(full_path, &entry_st) != 0 || !S_ISREG(entry_st.st_mode))
-                continue;
-
-            // Expandir arreglo si es necesario
-            if (thread_count >= thread_capacity) {
-                thread_capacity = (thread_capacity == 0) ? 10 : thread_capacity * 2;
-                threads = realloc(threads, thread_capacity * sizeof(ThreadInfo));
-                if (!threads) {
-                    perror("Error al reservar memoria para hilos");
-                    closedir(dir);
-                    return;
-                }
-            }
-
-            // Preparar argumentos para este archivo (allocar memoria persistente)
-            ThreadArgs* ta = malloc(sizeof(ThreadArgs));
-            if (!ta) {
-                perror("Error al reservar memoria para ThreadArgs");
-                continue;
-            }
-            
-            *ta = myargs;
-            ta->inPath = strdup(full_path);
-
-            const char* base = get_basename(entry->d_name);
-            // Quitar extensión del nombre base
-            char name_noext[512];
-            strncpy(name_noext, base, sizeof(name_noext)); 
-            name_noext[sizeof(name_noext)-1] = '\0';
-            char* dot = strrchr(name_noext, '.');
-            if (dot) *dot = '\0';
-
-            char out_full[1024];
-            
-            // Si se encripta un directorio, comprimir primero y luego encriptar para que la desencriptación pueda restaurar los originales
-            if (myargs.op_e) {
-                ta->op_e = true;
-                ta->op_c = true;
-                if (!ta->compAlg || ta->compAlg[0] == '\0') {
-                    ta->compAlg = "rle";  // Usar RLE por defecto si no se especifica
-                }
-                snprintf(out_full, sizeof(out_full), "%s/%s.bin", outFolder, name_noext);
-                ta->outPath = strdup(out_full);
-            }
-            // Si se desencripta, establecer outPath a la carpeta de salida para que funcione la descompresión automática
-            else if (myargs.op_u) {
-                snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, base);
-                ta->outPath = strdup(out_full);
-            } else {
-                // Construir un nombre de archivo de salida único dentro de outFolder basado en el nombre base de entrada
-                const char* compAlg = myargs.compAlg;
-                const char* ext = "";
-                if (strcmp(compAlg, "huffman") == 0) ext = "bin";
-                else if (strcmp(compAlg, "rle") == 0) ext = "rle";
-                else if (strcmp(compAlg, "lzw") == 0) ext = "lzw";
-
-                if (ext[0] != '\0')
-                    snprintf(out_full, sizeof(out_full), "%s/%s.%s", outFolder, name_noext, ext);
-                else
-                    snprintf(out_full, sizeof(out_full), "%s/%s", outFolder, name_noext);
-
-                ta->outPath = strdup(out_full); // Destino por archivo
-
-                // Si estamos procesando un directorio para descompresión, intentar detectar el algoritmo por archivo
-                if (ta->op_d) {
-                    const char* fileext = get_extension(entry->d_name);
-                    if (strcmp(fileext, "rle") == 0) {
-                        ta->compAlg = "rle";
-                    } else if (strcmp(fileext, "lzw") == 0) {
-                        ta->compAlg = "lzw";
-                    } else if (strcmp(fileext, "bin") == 0 || strcmp(fileext, "huff") == 0) {
-                        ta->compAlg = "huffman";
-                    } else {
-                        // Extensión desconocida: usar el algoritmo proporcionado
-                        ta->compAlg = myargs.compAlg;
-                    }
-                }
-            }
-
-            // Crear hilo para procesar este archivo EN PARALELO
-            threads[thread_count].args = ta;
-            int ret = pthread_create(&threads[thread_count].thread, NULL, operationOneFile, ta);
-            if (ret != 0) {
-                fprintf(stderr, "Error creando hilo para %s: %s\n", entry->d_name, strerror(ret));
-                free((char*)ta->inPath);
-                free((char*)ta->outPath);
-                free(ta);
-                continue;
-            }
-            
-            printf("  → Hilo %d: procesando '%s' en paralelo...\n", thread_count + 1, entry->d_name);
-            thread_count++;
-        }
-        
-        closedir(dir);
-
-        // FASE 2: Esperar a que todos los hilos terminen (join)
-        printf("\nEsperando a que terminen %d hilos...\n", thread_count);
-        for (int i = 0; i < thread_count; i++) {
-            pthread_join(threads[i].thread, NULL);
-            printf("  ✓ Hilo %d completado\n", i + 1);
+        // FASE 2: Esperar a que todos los hilos terminen
+        printf("\nFASE 2: Esperando a que terminen %d hilos...\n", pool.count);
+        for (int i = 0; i < pool.count; i++) {
+            pthread_join(pool.threads[i].thread, NULL);
             
             // Liberar memoria de argumentos
-            free((char*)threads[i].args->inPath);
-            free((char*)threads[i].args->outPath);
-            free(threads[i].args);
+            free((char*)pool.threads[i].args->inPath);
+            free((char*)pool.threads[i].args->outPath);
+            free((char*)pool.threads[i].args->thread_file_name);
+            free(pool.threads[i].args);
         }
 
         // Liberar array de hilos
-        free(threads);
+        free(pool.threads);
         
-        printf("\nProcesamiento paralelo completado. %d archivos procesados.\n", thread_count);
+        printf("\nProcesamiento paralelo y recursivo completado. %d archivos procesados.\n", pool.count);
     } else {
         printf("It is neither a regular file nor a directory.\n");
     }
