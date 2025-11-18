@@ -11,8 +11,9 @@
 #include "lzw.h"
 #include "aes.h"
 #include "common.h"
-#include "OperationsFileManager/multiFeature.h"
+#include "OperationsFileManager/multiFeature.h" 
 
+// Mensaje de ayuda en la consola para el uso del programa
 static void usage(const char* prog) {
     fprintf(stderr,
         "Uso: %s [ops] [opciones]\n\n"
@@ -31,19 +32,15 @@ static void usage(const char* prog) {
         "  -k [clave]            Clave para encriptar/desencriptar\n\n",
         prog);
 }
-
+// Verificar si la ruta es un directorio
 static bool is_dir(const char* path) {
     struct stat st;
     if (stat(path, &st) != 0) return false;
     return S_ISDIR(st.st_mode);
 }
 
-/*
-ejemplo: ./app -c --comp-alg huffman -i File_Manager/input.txt -o salida.bin
+// ejemplo de uso: ./app -c --comp-alg huffman -i File_Manager/input.txt -o salida.bin
 
-Before of using OperationsFileManager, that helps us to interact with File_Manager,
-let's find out if the input parameters from the user are valid.
-*/
 int main(int argc, char** argv) {
     bool op_c = false, op_d = false, op_e = false, op_u = false;
     char* compAlg = "huffman";
