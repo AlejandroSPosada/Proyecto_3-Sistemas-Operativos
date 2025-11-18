@@ -141,7 +141,20 @@ int main(int argc, char** argv) {
     }
 
     // Ejecutar operación individual o combinación
-    ThreadArgs myargs = {op_c, op_d, op_e, op_u, compAlg, encAlg, inPath, outPath, key};
+    ThreadArgs myargs = {
+        .op_c = op_c, 
+        .op_d = op_d, 
+        .op_e = op_e, 
+        .op_u = op_u, 
+        .compAlg = compAlg, 
+        .encAlg = encAlg, 
+        .inPath = inPath, 
+        .outPath = outPath, 
+        .key = key,
+        .thread_index = 0,
+        .thread_file_name = NULL,
+        .elapsed_time = 0.0
+    };
     initOperation(myargs);
 
     return 0;

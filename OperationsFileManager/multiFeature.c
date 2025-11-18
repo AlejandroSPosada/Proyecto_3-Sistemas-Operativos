@@ -229,30 +229,22 @@ void* operationOneFile(void* arg) {
         }
         
         // Determinar destino final
-        char original_name[512];
-        int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
         char final_dest[1536];
         
-        if (have_original) {
-            char folder[1024];
-            if (outPath && strchr(outPath, '/') != NULL) {
-                const char* last = strrchr(outPath, '/');
-                size_t len = last - outPath;
-                if (len >= sizeof(folder)) len = sizeof(folder) - 1;
-                strncpy(folder, outPath, len);
-                folder[len] = '\0';
+        // Si el usuario especificó -o, usar esa ruta
+        if (outPath) {
+            if (strchr(outPath, '/') != NULL) {
+                snprintf(final_dest, sizeof(final_dest), "%s", outPath);
             } else {
-                strncpy(folder, "File_Manager", sizeof(folder)); folder[sizeof(folder)-1] = '\0';
+                snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", outPath);
             }
-            snprintf(final_dest, sizeof(final_dest), "%s/%s", folder, get_basename(original_name));
         } else {
-            if (outPath) {
-                if (strchr(outPath, '/') != NULL) {
-                    snprintf(final_dest, sizeof(final_dest), "%s", outPath);
-                } else {
-                    const char* base = get_basename(outPath);
-                    snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", base);
-                }
+            // Si no especificó -o, intentar usar el nombre original de los metadatos
+            char original_name[512];
+            int have_original = read_original_name_from_compressed(inPath, original_name, sizeof(original_name)) == 0;
+            
+            if (have_original) {
+                snprintf(final_dest, sizeof(final_dest), "File_Manager/%s", get_basename(original_name));
             } else {
                 snprintf(final_dest, sizeof(final_dest), "File_Manager/output.txt");
             }
@@ -711,9 +703,16 @@ void initOperation(ThreadArgs myargs) {
 
     if (S_ISREG(st.st_mode)) {
         printf("It is a file.\n");
+        // Inicializar valores para archivo individual
+        myargs.thread_index = 1;
+        myargs.thread_file_name = strdup(get_basename(path));
+        
         pthread_t thread1;
         pthread_create(&thread1, NULL, operationOneFile, &myargs);
         pthread_join(thread1, NULL);
+        
+        // Liberar memoria
+        free((char*)myargs.thread_file_name);
         return;
     } else if (S_ISDIR(st.st_mode)) {
         printf("It is a folder - processing files RECURSIVELY in PARALLEL...\n");
