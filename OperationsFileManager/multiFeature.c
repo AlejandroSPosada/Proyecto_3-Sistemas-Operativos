@@ -779,7 +779,7 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
                 continue;
             }
             
-            printf("  → Hilo %d: procesando '%s' en paralelo...\n", ta->thread_index, rel_file_path);
+            printf("Hilo %d: procesando '%s' en paralelo.\n", ta->thread_index, rel_file_path);
             pool->count++;
             (*global_thread_count)++;
         }
@@ -788,12 +788,7 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
     closedir(dir);
 }
 
-/*
-Here we start with the interaction with File_Manager. 
-First let's realize if we are dealing with a file or a folder. 
-If only a file, then only a thread. If a folder, then let's use several threads IN PARALLEL.
-Now it recursively processes subdirectories while maintaining folder structure.
-*/
+// Verificacion de archivo o carpeta.
 void initOperation(ThreadArgs myargs) {
     const char *path = myargs.inPath;
     struct stat st;
@@ -821,7 +816,7 @@ void initOperation(ThreadArgs myargs) {
         free((char*)myargs.thread_file_name);
         return;
     } else if (S_ISDIR(st.st_mode)) {
-        printf("It is a folder - processing files RECURSIVELY in PARALLEL...\n");
+        printf("Procesando archivos.\n");
 
         // Capturar tiempo de inicio para toda la carpeta
         struct timespec folder_start_time;
@@ -841,11 +836,11 @@ void initOperation(ThreadArgs myargs) {
         int global_thread_count = 0;
 
         // FASE 1: Recorrer recursivamente y crear hilos
-        printf("\nFASE 1: Escaneando directorios y creando hilos...\n");
+        printf("\nEscaneando directorios y creando hilos.\n");
         process_directory_recursive(path, path, outFolder, myargs, &pool, &global_thread_count);
 
         // FASE 2: Esperar a que todos los hilos terminen
-        printf("\nFASE 2: Esperando a que terminen %d hilos...\n", pool.count);
+        printf("\nEsperando a que terminen %d hilos.\n", pool.count);
         for (int i = 0; i < pool.count; i++) {
             pthread_join(pool.threads[i].thread, NULL);
             
@@ -862,7 +857,7 @@ void initOperation(ThreadArgs myargs) {
         // Liberar array de hilos
         free(pool.threads);
         
-        printf("\nProcesamiento paralelo y recursivo completado. %d archivos procesados.\n", pool.count);
+        printf("\nProcesamiento completado. %d archivos procesados.\n", pool.count);
         printf("Tiempo total: %.2f segundos\n", folder_total_time);
     } else {
         printf("It is neither a regular file nor a directory.\n");
