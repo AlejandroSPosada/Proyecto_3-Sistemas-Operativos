@@ -78,7 +78,3 @@ Referencias rápidas (archivos y símbolos citados)
 - Utilidades POSIX y comunes:
   - [`posix_read_full`](posix_utils.c), [`posix_write_full`](posix_utils.c) — [posix_utils.c](posix_utils.c), [posix_utils.h](posix_utils.h)
   - [`FileMetadata`](common.h), [`get_basename`](common.h), [`get_extension`](common.h) — [common.h](common.h)
-
-Si deseas, puedo:
-- Generar ejemplos concretos de comandos según tu caso de uso.
-- Añadir instrucciones detalladas de build / debug para Visual Studio Code (launch/tasks) o tests.
