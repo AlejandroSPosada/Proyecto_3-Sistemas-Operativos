@@ -8,12 +8,13 @@
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <unistd.h>
 #include "../common.h"
-#include "huffman.h"
-#include "rle.h"
-#include "vigenere.h"
-#include "lzw.h"
-#include "aes.h"
+#include "../Compresion/huffman.h"
+#include "../Compresion/rle.h"
+#include "../Compresion/lzw.h"
+#include "../Encription/vigenere.h"
+#include "../Encription/aes.h"
 #include <dirent.h>
 #include <time.h>
 
@@ -39,6 +40,7 @@ typedef struct ThreadArgs{
 bool file_exists(const char* path);
 void get_file_base(const char* filepath, char* base, size_t size);
 int move_file(const char* src, const char* dst);
+void ensure_directory_exists(const char* dir_path);
 void* operationOneFile(void* arg);
 void initOperation(ThreadArgs p);
 

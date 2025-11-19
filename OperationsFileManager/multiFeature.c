@@ -1,6 +1,8 @@
 #include "multiFeature.h"
 #include <fcntl.h>
 #include <unistd.h>
+#include <time.h>
+#include <sys/types.h>
 
 // Declaraciones anticipadas
 static int read_original_name_from_compressed(const char* compressed_path, char* out_name, size_t out_size);
@@ -519,8 +521,26 @@ static void ensure_parent_directory_exists(const char* file_path) {
     char* last_slash = strrchr(path, '/');
     if (last_slash) {
         *last_slash = '\0';
-        // Crear directorio recursivamente
-        mkdir(path, 0755);
+        
+        // Crear directorios recursivamente
+        char temp[2048];
+        char* p = NULL;
+        size_t len;
+        
+        snprintf(temp, sizeof(temp), "%s", path);
+        len = strlen(temp);
+        if (temp[len - 1] == '/') {
+            temp[len - 1] = 0;
+        }
+        
+        for (p = temp + 1; *p; p++) {
+            if (*p == '/') {
+                *p = 0;
+                mkdir(temp, 0755);
+                *p = '/';
+            }
+        }
+        mkdir(temp, 0755);
     }
 }
 
@@ -607,6 +627,11 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
             
             *ta = myargs;
             ta->inPath = strdup(full_path);
+            if (!ta->inPath) {
+                perror("Error al reservar memoria para inPath");
+                free(ta);
+                continue;
+            }
 
             // Obtener ruta relativa del archivo desde el directorio base
             char rel_file_path[1024];
@@ -644,12 +669,24 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
                 }
                 snprintf(out_full, sizeof(out_full), "%s/%s.bin", base_output_dir, name_noext);
                 ta->outPath = strdup(out_full);
+                if (!ta->outPath) {
+                    perror("Error al reservar memoria para outPath");
+                    free((char*)ta->inPath);
+                    free(ta);
+                    continue;
+                }
             }
             // Si solo se encripta (-e sin -c)
             else if (myargs.op_e) {
                 // -e: solo encriptar, sin comprimir
                 snprintf(out_full, sizeof(out_full), "%s/%s.bin", base_output_dir, rel_file_path);
                 ta->outPath = strdup(out_full);
+                if (!ta->outPath) {
+                    perror("Error al reservar memoria para outPath");
+                    free((char*)ta->inPath);
+                    free(ta);
+                    continue;
+                }
             }
             // Si se desencripta
             else if (myargs.op_u) {
@@ -668,6 +705,12 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
                 
                 snprintf(out_full, sizeof(out_full), "%s/%s", base_output_dir, decrypted_name);
                 ta->outPath = strdup(out_full);
+                if (!ta->outPath) {
+                    perror("Error al reservar memoria para outPath");
+                    free((char*)ta->inPath);
+                    free(ta);
+                    continue;
+                }
             } 
             else {
                 // Compresión o descompresión normal
@@ -689,6 +732,12 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
                 }
 
                 ta->outPath = strdup(out_full);
+                if (!ta->outPath) {
+                    perror("Error al reservar memoria para outPath");
+                    free((char*)ta->inPath);
+                    free(ta);
+                    continue;
+                }
 
                 // Detectar algoritmo por extensión en descompresión
                 if (ta->op_d) {
@@ -711,6 +760,13 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
             // Crear hilo para procesar este archivo EN PARALELO
             ta->thread_index = pool->count + 1;  // Asignar número de hilo
             ta->thread_file_name = strdup(rel_file_path);  // Asignar nombre de archivo
+            if (!ta->thread_file_name) {
+                perror("Error al reservar memoria para thread_file_name");
+                free((char*)ta->inPath);
+                free((char*)ta->outPath);
+                free(ta);
+                continue;
+            }
             
             pool->threads[pool->count].args = ta;
             int ret = pthread_create(&pool->threads[pool->count].thread, NULL, operationOneFile, ta);
@@ -752,6 +808,10 @@ void initOperation(ThreadArgs myargs) {
         // Inicializar valores para archivo individual
         myargs.thread_index = 1;
         myargs.thread_file_name = strdup(get_basename(path));
+        if (!myargs.thread_file_name) {
+            perror("Error al reservar memoria para thread_file_name");
+            return;
+        }
         
         pthread_t thread1;
         pthread_create(&thread1, NULL, operationOneFile, &myargs);
@@ -762,6 +822,10 @@ void initOperation(ThreadArgs myargs) {
         return;
     } else if (S_ISDIR(st.st_mode)) {
         printf("It is a folder - processing files RECURSIVELY in PARALLEL...\n");
+
+        // Capturar tiempo de inicio para toda la carpeta
+        struct timespec folder_start_time;
+        clock_gettime(CLOCK_MONOTONIC, &folder_start_time);
 
         // Crear carpeta de salida
         char outFolder[1024];
@@ -792,10 +856,14 @@ void initOperation(ThreadArgs myargs) {
             free(pool.threads[i].args);
         }
 
+        // Calcular tiempo total transcurrido
+        double folder_total_time = get_elapsed_time(folder_start_time);
+
         // Liberar array de hilos
         free(pool.threads);
         
         printf("\nProcesamiento paralelo y recursivo completado. %d archivos procesados.\n", pool.count);
+        printf("Tiempo total: %.2f segundos\n", folder_total_time);
     } else {
         printf("It is neither a regular file nor a directory.\n");
     }
