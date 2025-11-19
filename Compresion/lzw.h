@@ -1,14 +1,13 @@
-#ifndef LZW_H
-#define LZW_H
+#ifndef LZW
+#define LZW
 
-#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
 
-/**
- * LZW compression interface compatible with the project's other compressors.
- * writeLZW: compress input file and write to specified output file
- * readLZW: read a .lzw file and write decompressed bytes to specified output file
- */
-void writeLZW(char inputFile[], char outputFile[]);
-int readLZW(char inputFile[], char outputFile[]);
+int lzw_compress(const unsigned char *input, size_t len,
+                 uint16_t **outCodes, size_t *outCount);
+
+unsigned char* lzw_decompress(const uint16_t *codes, size_t count,
+                              size_t *outLen);
 
 #endif
