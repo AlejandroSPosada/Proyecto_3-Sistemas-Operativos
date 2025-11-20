@@ -600,7 +600,7 @@ static void process_directory_recursive(const char* base_input_dir, const char* 
             snprintf(output_subdir, sizeof(output_subdir), "%s/%s", base_output_dir, rel_path);
             ensure_directory_exists(output_subdir);
             
-            printf("  → Entrando en subdirectorio: %s\n", rel_path);
+            printf("Entrando en subdirectorio: %s\n", rel_path);
             process_directory_recursive(base_input_dir, full_path, base_output_dir, myargs, pool, global_thread_count);
             continue;
         }
@@ -860,6 +860,6 @@ void initOperation(ThreadArgs myargs) {
         printf("\nProcesamiento completado. %d archivos procesados.\n", pool.count);
         printf("Tiempo total: %.2f segundos\n", folder_total_time);
     } else {
-        printf("It is neither a regular file nor a directory.\n");
+        printf("No es un archivo regular o un directorio.\n");
     }
 }
