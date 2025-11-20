@@ -401,13 +401,13 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     
     uint8_t* fileData = (uint8_t*)malloc(fileSize + AES_BLOCK_SIZE);
     if (!fileData) {
-        fprintf(stderr, "Memory allocation failed\n");
+        fprintf(stderr, "Falló asignación de memoria\n");
         posix_close(fd_input);
         return -1;
     }
     
     if (posix_read_full(fd_input, fileData, fileSize) != fileSize) {
-        fprintf(stderr, "Failed to read file\n");
+        fprintf(stderr, "Falló lectura de archivo\n");
         free(fileData);
         posix_close(fd_input);
         return -1;
@@ -416,7 +416,7 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     
     size_t paddedSize = add_padding(fileData, fileSize, fileSize + AES_BLOCK_SIZE);
     if (paddedSize == 0) {
-        fprintf(stderr, "Padding failed\n");
+        fprintf(stderr, "Falló relleno\n");
         free(fileData);
         return -1;
     }
@@ -429,7 +429,7 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     
     uint8_t* encrypted = (uint8_t*)malloc(paddedSize);
     if (!encrypted) {
-        fprintf(stderr, "Memory allocation failed\n");
+        fprintf(stderr, "Falló asignación de memoria\n");
         free(fileData);
         return -1;
     }
@@ -455,7 +455,7 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     meta.originalName[MAX_FILENAME_LEN - 1] = '\0';
     
     if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
-        fprintf(stderr, "Failed to write metadata\n");
+        fprintf(stderr, "Falló escritura de metadatos\n");
         posix_close(fd_output);
         free(fileData);
         free(encrypted);
@@ -463,7 +463,7 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
     }
     
     if (posix_write_full(fd_output, encrypted, paddedSize) != (ssize_t)paddedSize) {
-        fprintf(stderr, "Failed to write encrypted data\n");
+        fprintf(stderr, "Falló escritura de datos encriptados\n");
         posix_close(fd_output);
         free(fileData);
         free(encrypted);
@@ -484,20 +484,20 @@ int aes_encrypt_file(const char* inputPath, const char* outputPath, const char* 
 int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* password) {
     int fd_input = posix_open_read(inputPath);
     if (fd_input < 0) {
-        fprintf(stderr, "Cannot open input file '%s': %s\n", inputPath, strerror(errno));
+        fprintf(stderr, "No se puede abrir archivo de entrada '%s': %s\n", inputPath, strerror(errno));
         return -1;
     }
     
     FileMetadata meta;
     if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) || meta.magic != METADATA_MAGIC) {
-        fprintf(stderr, "Invalid or corrupted encrypted file\n");
+        fprintf(stderr, "Archivo encriptado inválido o corrupto\n");
         posix_close(fd_input);
         return -1;
     }
     
     off_t totalSize = posix_get_file_size(fd_input);
     if (totalSize < 0) {
-        fprintf(stderr, "Failed to get file size\n");
+        fprintf(stderr, "Falló obtención de tamaño de archivo\n");
         posix_close(fd_input);
         return -1;
     }
@@ -505,20 +505,20 @@ int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* 
     long encryptedSize = totalSize - sizeof(meta);
     
     if (encryptedSize <= 0 || encryptedSize % AES_BLOCK_SIZE != 0) {
-        fprintf(stderr, "Invalid encrypted data size\n");
+        fprintf(stderr, "Tamaño de datos encriptados inválido\n");
         posix_close(fd_input);
         return -1;
     }
     
     uint8_t* encrypted = (uint8_t*)malloc(encryptedSize);
     if (!encrypted) {
-        fprintf(stderr, "Memory allocation failed\n");
+        fprintf(stderr, "Falló asignación de memoria\n");
         posix_close(fd_input);
         return -1;
     }
     
     if (posix_read_full(fd_input, encrypted, encryptedSize) != encryptedSize) {
-        fprintf(stderr, "Failed to read encrypted data\n");
+        fprintf(stderr, "Falló lectura de datos encriptados\n");
         free(encrypted);
         posix_close(fd_input);
         return -1;
@@ -533,7 +533,7 @@ int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* 
     
     uint8_t* decrypted = (uint8_t*)malloc(encryptedSize);
     if (!decrypted) {
-        fprintf(stderr, "Memory allocation failed\n");
+        fprintf(stderr, "Falló asignación de memoria\n");
         free(encrypted);
         return -1;
     }
@@ -544,7 +544,7 @@ int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* 
     
     size_t originalSize = remove_padding(decrypted, encryptedSize);
     if (originalSize == 0) {
-        fprintf(stderr, "Decryption failed (wrong password or corrupted file)\n");
+        fprintf(stderr, "Falló desencriptación (contraseña incorrecta o archivo corrupto)\n");
         free(encrypted);
         free(decrypted);
         return -1;
@@ -552,14 +552,14 @@ int aes_decrypt_file(const char* inputPath, const char* outputPath, const char* 
     
     int fd_output = posix_open_write(outputPath);
     if (fd_output < 0) {
-        fprintf(stderr, "Cannot create output file '%s': %s\n", outputPath, strerror(errno));
+        fprintf(stderr, "No se puede crear archivo de salida '%s': %s\n", outputPath, strerror(errno));
         free(encrypted);
         free(decrypted);
         return -1;
     }
     
     if (posix_write_full(fd_output, decrypted, originalSize) != (ssize_t)originalSize) {
-        fprintf(stderr, "Failed to write decrypted data\n");
+        fprintf(stderr, "Falló escritura de datos desencriptados\n");
         posix_close(fd_output);
         free(encrypted);
         free(decrypted);

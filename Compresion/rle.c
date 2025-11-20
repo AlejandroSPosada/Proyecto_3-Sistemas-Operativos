@@ -11,12 +11,12 @@
 #include "../common.h"
 #include "../posix_utils.h"
 
-#define MAX_RUN_LENGTH 0xFFFFFFFF  // Maximum run length for uint32_t
+#define MAX_RUN_LENGTH 0xFFFFFFFF  // Longitud de ejecución máxima para uint32_t
 
 /**
- * Run-Length Encoding Compression (POSIX VERSION)
- * Encodes consecutive runs of the same byte as [count][byte] pairs
- * Uses uint32_t for counts to handle long runs efficiently
+ * Codificación de Longitud de Ejecución Compresión (VERSIÓN POSIX)
+ * Codifica ejecuciones consecutivas del mismo byte como pares [count][byte]
+ * Usa uint32_t para contar para manejar ejecuciones largas de manera eficiente
  */
 void writeRLE(char inputFile[], char outputFile[]) {
     // Abrir archivo de entrada con POSIX
@@ -28,14 +28,14 @@ void writeRLE(char inputFile[], char outputFile[]) {
     // Obtener tamaño del archivo con fstat
     off_t fileSize = posix_get_file_size(fd_input);
     if (fileSize <= 0) {
-        fprintf(stderr, "File '%s' is empty or invalid\n", inputFile);
+        fprintf(stderr, "Archivo '%s' está vacío o es inválido\n", inputFile);
         posix_close(fd_input);
         return;
     }
 
     // Verificar que es archivo regular
     if (posix_is_regular_file(fd_input) != 1) {
-        fprintf(stderr, "'%s' is not a regular file\n", inputFile);
+        fprintf(stderr, "'%s' no es un archivo regular\n", inputFile);
         posix_close(fd_input);
         return;
     }
@@ -43,7 +43,7 @@ void writeRLE(char inputFile[], char outputFile[]) {
     // Allocar buffer para todo el archivo
     unsigned char* data = (unsigned char*)malloc(fileSize);
     if (!data) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         posix_close(fd_input);
         return;
     }
@@ -53,7 +53,7 @@ void writeRLE(char inputFile[], char outputFile[]) {
     posix_close(fd_input);
 
     if (bytes_read != fileSize) {
-        fprintf(stderr, "Failed to read complete file: expected %ld, got %ld bytes\n",
+        fprintf(stderr, "Falló lectura de archivo completo: esperado %ld, obtenido %ld bytes\n",
                 (long)fileSize, (long)bytes_read);
         free(data);
         return;
@@ -75,7 +75,7 @@ void writeRLE(char inputFile[], char outputFile[]) {
     meta.originalName[MAX_FILENAME_LEN-1] = '\0';
     
     if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
-        fprintf(stderr, "Failed to write metadata\n");
+        fprintf(stderr, "Falló escritura de metadatos\n");
         posix_close(fd_output);
         free(data);
         return;
@@ -96,14 +96,14 @@ void writeRLE(char inputFile[], char outputFile[]) {
         
         // Escribir par [count][byte] usando POSIX
         if (posix_write_full(fd_output, &count, sizeof(uint32_t)) != sizeof(uint32_t)) {
-            fprintf(stderr, "Failed to write count\n");
+            fprintf(stderr, "Falló escritura de conteo\n");
             posix_close(fd_output);
             free(data);
             return;
         }
         
         if (posix_write_full(fd_output, &currentByte, sizeof(unsigned char)) != sizeof(unsigned char)) {
-            fprintf(stderr, "Failed to write byte\n");
+            fprintf(stderr, "Falló escritura de byte\n");
             posix_close(fd_output);
             free(data);
             return;
@@ -117,8 +117,8 @@ void writeRLE(char inputFile[], char outputFile[]) {
 }
 
 /**
- * Run-Length Encoding Decompression (POSIX VERSION)
- * Reads [count][byte] pairs and expands them to original data
+ * Codificación de Longitud de Ejecución Descompresión (VERSIÓN POSIX)
+ * Lee pares [count][byte] y los expande a datos originales
  */
 int readRLE(char inputFile[], char outputFile[]) {
     // Abrir archivo comprimido con POSIX
@@ -131,14 +131,14 @@ int readRLE(char inputFile[], char outputFile[]) {
     FileMetadata meta;
     if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) || 
         meta.magic != METADATA_MAGIC) {
-        fprintf(stderr, "Invalid or missing metadata in compressed file\n");
+        fprintf(stderr, "Metadatos faltantes o inválidos en archivo comprimido\n");
         posix_close(fd_input);
         return 1;
     }
 
     uint64_t originalSize = meta.originalSize;
     if (originalSize == 0 || originalSize > 1024ULL * 1024 * 1024 * 10) { // Max 10GB sanity check
-        fprintf(stderr, "Invalid or too large original size: %llu\n", 
+        fprintf(stderr, "Tamaño original inválido o demasiado grande: %llu\n", 
                 (unsigned long long)originalSize);
         posix_close(fd_input);
         return 1;
@@ -147,7 +147,7 @@ int readRLE(char inputFile[], char outputFile[]) {
     // Allocar buffer de salida
     unsigned char* output = (unsigned char*)malloc(originalSize);
     if (!output) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         posix_close(fd_input);
         return 1;
     }
@@ -162,7 +162,7 @@ int readRLE(char inputFile[], char outputFile[]) {
         ssize_t n = posix_read_full(fd_input, &count, sizeof(uint32_t));
         if (n == 0) break;  // EOF alcanzado
         if (n != sizeof(uint32_t)) {
-            fprintf(stderr, "Failed to read count\n");
+            fprintf(stderr, "Falló lectura de conteo\n");
             free(output);
             posix_close(fd_input);
             return 1;
@@ -170,7 +170,7 @@ int readRLE(char inputFile[], char outputFile[]) {
         
         // Leer byte
         if (posix_read_full(fd_input, &byte, sizeof(unsigned char)) != sizeof(unsigned char)) {
-            fprintf(stderr, "Failed to read byte\n");
+            fprintf(stderr, "Falló lectura de byte\n");
             free(output);
             posix_close(fd_input);
             return 1;
@@ -178,7 +178,7 @@ int readRLE(char inputFile[], char outputFile[]) {
         
         // Validar que count no exceda el espacio restante
         if (outputPos + count > originalSize) {
-            fprintf(stderr, "RLE data corruption: run exceeds original size\n");
+            fprintf(stderr, "Corrupción de datos RLE: ejecución excede tamaño original\n");
             free(output);
             posix_close(fd_input);
             return 1;
@@ -194,7 +194,7 @@ int readRLE(char inputFile[], char outputFile[]) {
 
     // Verificar que obtuvimos la cantidad esperada de datos
     if (outputPos != originalSize) {
-        fprintf(stderr, "Size mismatch: expected %llu, got %zu bytes\n", 
+        fprintf(stderr, "Discrepancia de tamaño: esperado %llu, obtenido %zu bytes\n", 
                 (unsigned long long)originalSize, outputPos);
         free(output);
         return 1;
@@ -211,7 +211,7 @@ int readRLE(char inputFile[], char outputFile[]) {
     posix_close(fd_output);
     
     if (written != (ssize_t)originalSize) {
-        fprintf(stderr, "Failed to write complete output\n");
+        fprintf(stderr, "Falló escritura de salida completa\n");
         free(output);
         return 1;
     }

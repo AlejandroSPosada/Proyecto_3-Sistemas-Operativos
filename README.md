@@ -9,13 +9,13 @@ Compilación
 
 Uso (ejemplos)
 - Comprimir con LZW: 
-  ./app -c --comp-alg lzw -i File_Manager/testing/prueba.txt -o salida.lzw
+  ./programa -c --comp-alg lzw -i File_Manager/testing -o File_Manager/comprimido
 - Descomprimir:
-  ./app -d --comp-alg lzw -i salida.lzw -o salida.txt
-- Comprimir y luego encriptar (-ce):
-  ./app -ce --comp-alg huffman --enc-alg aes -i input.txt -o out.enc -k MiClave
-- Desencriptar y luego descomprimir (-ud):
-  ./app -ud --enc-alg aes --comp-alg huffman -i out.enc -o original.txt -k MiClave
+  ./programa -d --comp-alg lzw -i File_Manager/comprimido -o File_Manager/descomprimido
+- Encriptar con vigenere:
+  ./programa -e --enc-alg vigenere -i File_Manager/testing -o File_Manager/encriptado -k MiClave
+- Desencriptar:
+  ./programa -u --enc-alg vigenere -i File_Manager/encriptado -o File_Manager/desencriptado -k MiClave
 
 Estructura principal y responsabilidades
 - Ejecutable / flujo principal:

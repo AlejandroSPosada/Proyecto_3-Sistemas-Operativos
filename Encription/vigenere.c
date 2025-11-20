@@ -54,7 +54,7 @@ static int process_file(const char* inputPath, const char* outputPath, const cha
         meta.originalName[MAX_FILENAME_LEN-1] = '\0';
         
         if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
-            fprintf(stderr, "Failed to write metadata\n");
+            fprintf(stderr, "Falló escritura de metadatos\n");
             posix_close(fd_input);
             posix_close(fd_output);
             return 1;
@@ -64,7 +64,7 @@ static int process_file(const char* inputPath, const char* outputPath, const cha
         FileMetadata meta;
         if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) ||
             meta.magic != METADATA_MAGIC) {
-            fprintf(stderr, "Invalid or corrupted encrypted file\n");
+            fprintf(stderr, "Archivo encriptado inválido o corrupto\n");
             posix_close(fd_input);
             posix_close(fd_output);
             return 1;
@@ -80,7 +80,7 @@ static int process_file(const char* inputPath, const char* outputPath, const cha
         ssize_t bytes_read = read(fd_input, buffer, BUFFER_SIZE);
         if (bytes_read == -1) {
             if (errno == EINTR) continue;
-            fprintf(stderr, "Read error: %s\n", strerror(errno));
+            fprintf(stderr, "Error de lectura: %s\n", strerror(errno));
             posix_close(fd_input);
             posix_close(fd_output);
             return 1;
@@ -90,7 +90,7 @@ static int process_file(const char* inputPath, const char* outputPath, const cha
         process_bytes(buffer, bytes_read, (const unsigned char*)key, keyLen, encrypt);
         
         if (posix_write_full(fd_output, buffer, bytes_read) != bytes_read) {
-            fprintf(stderr, "Write error\n");
+            fprintf(stderr, "Error de escritura\n");
             posix_close(fd_input);
             posix_close(fd_output);
             return 1;

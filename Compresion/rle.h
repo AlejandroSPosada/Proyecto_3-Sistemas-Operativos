@@ -5,24 +5,24 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-// RLE (Run-Length Encoding) Compression Functions
-// Simple and efficient for data with many repeated sequences
+// RLE (Codificación de Longitud de Ejecución) Funciones de Compresión
+// Simple y eficiente para datos con muchas secuencias repetidas
 
 /**
- * Compress a file using Run-Length Encoding
- * Format: [count][byte] pairs where count is uint32_t
+ * Comprime un archivo usando Codificación de Longitud de Ejecución
+ * Formato: pares [count][byte] donde count es uint32_t
  * 
- * @param inputFile Path to the input file
- * @param outputFile Path to the output file
+ * @param inputFile Ruta del archivo de entrada
+ * @param outputFile Ruta del archivo de salida
  */
 void writeRLE(char inputFile[], char outputFile[]);
 
 /**
- * Decompress an RLE-compressed file
+ * Descomprime un archivo comprimido con RLE
  * 
- * @param inputFile Path to the compressed .rle file
- * @param outputFile Path to the output file
- * @return 0 on success, 1 on error
+ * @param inputFile Ruta del archivo .rle comprimido
+ * @param outputFile Ruta del archivo de salida
+ * @return 0 en éxito, 1 en error
  */
 int readRLE(char inputFile[], char outputFile[]);
 

@@ -54,14 +54,14 @@ void writeLZW(char inputFile[], char outputFile[]) {
     // Obtener tamaño con fstat
     off_t fileSize = posix_get_file_size(fd_input);
     if (fileSize < 0) {
-        fprintf(stderr, "Invalid file size for '%s'\n", inputFile);
+        fprintf(stderr, "Tamaño de archivo inválido para '%s'\n", inputFile);
         posix_close(fd_input);
         return;
     }
     // Reservar espacio en memoria para almacenar bytes del archivo
-    unsigned char *buf = (unsigned char*)malloc(fileSize > 0 ? fileSize : 1);
+    unsigned char* buf = (unsigned char*)malloc(fileSize);
     if (!buf) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         posix_close(fd_input);
         return;
     }
@@ -70,14 +70,14 @@ void writeLZW(char inputFile[], char outputFile[]) {
     posix_close(fd_input);
     
     if (bytes_read != fileSize) {
-        fprintf(stderr, "Failed to read complete file\n");
+        fprintf(stderr, "Falló lectura de archivo completo\n");
         free(buf);
         return;
     }
     // Se crea el diccionario inicial con sus 256 entradas preestablecidas.
     LZWEntry dict[LZW_MAX_DICT];
     int dictSize = crearDiccionario(dict);
-    if (dictSize < 0) { free(buf); fprintf(stderr, "Failed to init dictionary\n"); return; }
+    if (dictSize < 0) { free(buf); fprintf(stderr, "Falló inicialización de diccionario\n"); return; }
     // Se reserva espacio para los codigos LZW generados
     uint16_t *codes = (uint16_t*)malloc(sizeof(uint16_t) * (bytes_read + 16));
     if (!codes) { perror("malloc codes"); free(buf); freeDictionary(dict, dictSize); return; }
@@ -146,7 +146,7 @@ void writeLZW(char inputFile[], char outputFile[]) {
     meta.originalName[MAX_FILENAME_LEN-1] = '\0';
     
     if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
-        fprintf(stderr, "Failed to write metadata\n");
+        fprintf(stderr, "Falló escritura de metadatos\n");
         posix_close(fd_output);
         free(buf); free(codes); freeDictionary(dict, dictSize);
         if (w) free(w);
@@ -155,7 +155,7 @@ void writeLZW(char inputFile[], char outputFile[]) {
     // Se escribe el numero de codigos generados
     uint32_t count = (uint32_t)outCount;
     if (posix_write_full(fd_output, &count, sizeof(uint32_t)) != sizeof(uint32_t)) {
-        fprintf(stderr, "Failed to write count\n");
+        fprintf(stderr, "Falló escritura de conteo\n");
         posix_close(fd_output);
         free(buf); free(codes); freeDictionary(dict, dictSize);
         if (w) free(w);
@@ -164,7 +164,7 @@ void writeLZW(char inputFile[], char outputFile[]) {
     // Se escriben los codigos generados
     size_t codes_bytes = sizeof(uint16_t) * outCount;
     if (posix_write_full(fd_output, codes, codes_bytes) != (ssize_t)codes_bytes) {
-        fprintf(stderr, "Failed to write codes\n");
+        fprintf(stderr, "Falló escritura de códigos\n");
         posix_close(fd_output);
         free(buf); free(codes); freeDictionary(dict, dictSize);
         if (w) free(w);
@@ -188,7 +188,7 @@ int readLZW(char inputFile[], char outputFile[]) {
     FileMetadata meta;
     if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) ||
         meta.magic != METADATA_MAGIC) {
-        fprintf(stderr, "Invalid or missing metadata in compressed file\n");
+        fprintf(stderr, "Metadatos faltantes o inválidos en archivo comprimido\n");
         posix_close(fd_input);
         return 1;
     }
@@ -196,27 +196,27 @@ int readLZW(char inputFile[], char outputFile[]) {
     // Se leen los codigos y los datos comprimidos
     uint32_t count;
     if (posix_read_full(fd_input, &count, sizeof(uint32_t)) != sizeof(uint32_t)) {
-        fprintf(stderr, "Failed to read count\n");
+        fprintf(stderr, "Falló lectura de conteo\n");
         posix_close(fd_input);
         return 1;
     }
 
     if (count == 0) {
-        fprintf(stderr, "No codes in compressed file\n");
+        fprintf(stderr, "Sin códigos en archivo comprimido\n");
         posix_close(fd_input);
         return 1;
     }
     // Se cargan los codigos comprimidos en memoria
     uint16_t *codes = (uint16_t*)malloc(sizeof(uint16_t) * count);
     if (!codes) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         posix_close(fd_input);
         return 1;
     }
     
     size_t codes_bytes = sizeof(uint16_t) * count;
     if (posix_read_full(fd_input, codes, codes_bytes) != (ssize_t)codes_bytes) {
-        fprintf(stderr, "Failed to read codes\n");
+        fprintf(stderr, "Falló lectura de códigos\n");
         free(codes);
         posix_close(fd_input);
         return 1;
@@ -225,17 +225,17 @@ int readLZW(char inputFile[], char outputFile[]) {
     // Se recrea el diccionario inicial
     LZWEntry dict[LZW_MAX_DICT];
     int dictSize = crearDiccionario(dict);
-    if (dictSize < 0) { free(codes); fprintf(stderr, "Failed to init dictionary\n"); return 1; }
+    if (dictSize < 0) { free(codes); fprintf(stderr, "Falló inicialización de diccionario\n"); return 1; }
     // Buffer de salida para los datos descomprimidos
     unsigned char *outBuf = (unsigned char*)malloc(origSize > 0 ? origSize : 1);
     if (!outBuf) { perror("malloc outBuf"); free(codes); freeDictionary(dict, dictSize); return 1; }
     uint64_t outPos = 0;
 
     // Se procesa el primer codigo
-    if (codes[0] >= (uint16_t)dictSize) { fprintf(stderr, "Invalid first code\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+    if (codes[0] >= (uint16_t)dictSize) { fprintf(stderr, "Primer código inválido\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
     unsigned char *entry = dict[codes[0]].data;
     size_t entryLen = dict[codes[0]].len;
-    if (outPos + entryLen > origSize) { fprintf(stderr, "Output overflow\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+    if (outPos + entryLen > origSize) { fprintf(stderr, "Desbordamiento de salida\n"); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
     memcpy(outBuf + outPos, entry, entryLen);
     outPos += entryLen;
 
@@ -264,7 +264,7 @@ int readLZW(char inputFile[], char outputFile[]) {
             current[curLen-1] = prev[0];
         }
         // Se agrega la secuencia decodificada al nuevo archivo de salida
-        if (outPos + curLen > origSize) { fprintf(stderr, "Output overflow while writing\n"); free(current); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
+        if (outPos + curLen > origSize) { fprintf(stderr, "Desbordamiento de salida durante escritura\n"); free(current); free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1; }
         memcpy(outBuf + outPos, current, curLen);
         outPos += curLen;
 
@@ -287,7 +287,7 @@ int readLZW(char inputFile[], char outputFile[]) {
 
     if (outPos != origSize) {
         if (outPos > origSize) {
-            fprintf(stderr, "Decompressed size mismatch: expected %llu got %llu\n", (unsigned long long)origSize, (unsigned long long)outPos);
+            fprintf(stderr, "Discrepancia de tamaño descomprimido: esperado %llu obtenido %llu\n", (unsigned long long)origSize, (unsigned long long)outPos);
             free(prev); free(codes); free(outBuf); freeDictionary(dict, dictSize); return 1;
         }
     }

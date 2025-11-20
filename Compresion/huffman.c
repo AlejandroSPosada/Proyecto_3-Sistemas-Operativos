@@ -228,7 +228,7 @@ void storeCodes(struct MinHeapNode* root, int arr[], int top, char codes[][MAX_T
 void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]) {
     struct MinHeapNode* root = buildHuffmanTree(data, freq, size);
     if (!root) {
-        fprintf(stderr, "Error building Huffman tree\n");
+        fprintf(stderr, "Error al construir árbol de Huffman\n");
         return;
     }
     int arr[MAX_TREE_HT], top = 0;
@@ -244,8 +244,7 @@ void HuffmanCodes(char data[], int freq[], int size, char codes[][MAX_TREE_HT]) 
     freeHuffmanTree(root);
 }
 
-// --- Write in .bin ---
-// --- Write in .bin (POSIX VERSION) ---
+//(POSIX VERSION)
 void writeHuffman(char inputFile[], char outputFile[]) {
     // Abrir archivo de entrada con POSIX
     int fd_input = posix_open_read(inputFile);
@@ -254,7 +253,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     // Obtener tamaño del archivo
     off_t fileSize = posix_get_file_size(fd_input);
     if (fileSize <= 0) {
-        fprintf(stderr, "File '%s' is empty or invalid\n", inputFile);
+        fprintf(stderr, "Archivo '%s' está vacío o es inválido\n", inputFile);
         posix_close(fd_input);
         return;
     }
@@ -262,7 +261,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     // Allocar buffer para todo el archivo
     char* arr = (char*)malloc(fileSize);
     if (!arr) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         posix_close(fd_input);
         return;
     }
@@ -271,7 +270,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     posix_close(fd_input);
 
     if (bytes_read != fileSize) {
-        fprintf(stderr, "Failed to read from '%s'\n", inputFile);
+        fprintf(stderr, "Falló lectura desde '%s'\n", inputFile);
         free(arr);
         return;
     }
@@ -294,7 +293,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     }
 
     if (size == 0) {
-        fprintf(stderr, "No characters to encode\n");
+        fprintf(stderr, "Sin caracteres para codificar\n");
         free(arr);
         return;
     }
@@ -323,7 +322,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     meta.originalName[MAX_FILENAME_LEN-1] = '\0';
     
     if (posix_write_full(fd_output, &meta, sizeof(meta)) != sizeof(meta)) {
-        fprintf(stderr, "Failed to write metadata\n");
+        fprintf(stderr, "Falló escritura de metadatos\n");
         posix_close(fd_output);
         free(arr);
         return;
@@ -331,7 +330,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
 
     // Escribir header con tipos de tamaño fijo
     if (posix_write_full(fd_output, &size, sizeof(uint32_t)) != sizeof(uint32_t)) {
-        fprintf(stderr, "Failed to write size\n");
+        fprintf(stderr, "Falló escritura de tamaño\n");
         posix_close(fd_output);
         free(arr);
         return;
@@ -340,7 +339,7 @@ void writeHuffman(char inputFile[], char outputFile[]) {
     for (uint32_t i = 0; i < size; i++) {
         if (posix_write_full(fd_output, &chars[i], sizeof(char)) != sizeof(char) ||
             posix_write_full(fd_output, &freqs[i], sizeof(uint32_t)) != sizeof(uint32_t)) {
-            fprintf(stderr, "Failed to write char/freq\n");
+            fprintf(stderr, "Falló escritura de car/freq\n");
             posix_close(fd_output);
             free(arr);
             return;
@@ -403,7 +402,7 @@ void decodeHuffman(struct MinHeapNode* root, unsigned char* data, int dataSizeBi
             current = current->right;
 
         if (!current) {
-            fprintf(stderr, "Decode error: invalid tree traversal\n");
+            fprintf(stderr, "Error de decodificación: travesía de árbol inválida\n");
             return;
         }
 
@@ -424,20 +423,20 @@ int readHuffman(char inputFile[], char outputFile[]) {
     FileMetadata meta;
     if (posix_read_full(fd_input, &meta, sizeof(meta)) != sizeof(meta) ||
         meta.magic != METADATA_MAGIC) {
-        fprintf(stderr, "Invalid or missing metadata in compressed file\n");
+        fprintf(stderr, "Metadatos faltantes o inválidos en archivo comprimido\n");
         posix_close(fd_input);
         return 1;
     }
 
     uint32_t size;
     if (posix_read_full(fd_input, &size, sizeof(uint32_t)) != sizeof(uint32_t)) {
-        fprintf(stderr, "Failed to read size\n");
+        fprintf(stderr, "Falló lectura de tamaño\n");
         posix_close(fd_input);
         return 1;
     }
 
     if (size == 0 || size > MAX_CHARS) {
-        fprintf(stderr, "Invalid size in compressed file: %u\n", size);
+        fprintf(stderr, "Tamaño inválido en archivo comprimido: %u\n", size);
         posix_close(fd_input);
         return 1;
     }
@@ -446,7 +445,7 @@ int readHuffman(char inputFile[], char outputFile[]) {
     uint32_t* freqs = (uint32_t*)malloc(size * sizeof(uint32_t));
     
     if (!chars || !freqs) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         free(chars);
         free(freqs);
         posix_close(fd_input);
@@ -455,13 +454,13 @@ int readHuffman(char inputFile[], char outputFile[]) {
 
     for (uint32_t i = 0; i < size; i++) {
         if (posix_read_full(fd_input, &chars[i], sizeof(char)) != sizeof(char)) {
-            fprintf(stderr, "Failed to read char\n");
+            fprintf(stderr, "Falló lectura de carácter\n");
             posix_close(fd_input);
             free(chars); free(freqs);
             return 1;
         }
         if (posix_read_full(fd_input, &freqs[i], sizeof(uint32_t)) != sizeof(uint32_t)) {
-            fprintf(stderr, "Failed to read freq\n");
+            fprintf(stderr, "Falló lectura de frecuencia\n");
             posix_close(fd_input);
             free(chars); free(freqs);
             return 1;
@@ -471,7 +470,7 @@ int readHuffman(char inputFile[], char outputFile[]) {
     // Leer totalBits
     uint32_t totalBits;
     if (posix_read_full(fd_input, &totalBits, sizeof(uint32_t)) != sizeof(uint32_t)) {
-        fprintf(stderr, "Failed to read totalBits\n");
+        fprintf(stderr, "Falló lectura de totalBits\n");
         posix_close(fd_input);
         free(chars); free(freqs);
         return 1;
@@ -483,7 +482,7 @@ int readHuffman(char inputFile[], char outputFile[]) {
     off_t bytesToRead = fileSize - dataStart;
     
     if (bytesToRead <= 0) {
-        fprintf(stderr, "Invalid compressed file format\n");
+        fprintf(stderr, "Formato de archivo comprimido inválido\n");
         posix_close(fd_input);
         free(chars); free(freqs);
         return 1;
@@ -491,7 +490,7 @@ int readHuffman(char inputFile[], char outputFile[]) {
 
     unsigned char* encodedData = (unsigned char*)malloc(bytesToRead);
     if (!encodedData) {
-        fprintf(stderr, "Memory allocation failed: %s\n", strerror(errno));
+        fprintf(stderr, "Falló asignación de memoria: %s\n", strerror(errno));
         posix_close(fd_input);
         free(chars); free(freqs);
         return 1;
@@ -501,7 +500,7 @@ int readHuffman(char inputFile[], char outputFile[]) {
     posix_close(fd_input);
     
     if (bytes_read != bytesToRead) {
-        fprintf(stderr, "Failed to read encoded data\n");
+        fprintf(stderr, "Falló lectura de datos codificados\n");
         free(chars); free(freqs); free(encodedData);
         return 1;
     }
@@ -514,7 +513,7 @@ int readHuffman(char inputFile[], char outputFile[]) {
     struct MinHeapNode* root = buildHuffmanTree(chars, freqs_int, size);
     
     if (!root) {
-        fprintf(stderr, "Failed to rebuild Huffman tree\n");
+        fprintf(stderr, "Falló reconstrucción de árbol de Huffman\n");
         free(chars); free(freqs); free(encodedData);
         return 1;
     }
